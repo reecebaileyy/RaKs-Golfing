@@ -96,6 +96,13 @@ export interface PressEligibility {
   holes: number[];
 }
 
+/** One payment between two players, in cents (always positive). */
+export interface Transfer {
+  from: string;
+  to: string;
+  cents: number;
+}
+
 export interface Settlement {
   /** Signed cents per player. Always sums to zero. Positive = receives. */
   payouts: Record<string, number>;
@@ -103,4 +110,6 @@ export interface Settlement {
   pressOutcomes: ("WON" | "TIED" | "LOST" | "MOOT")[];
   /** Human readable lines explaining the money, for the results screen. */
   lines: string[];
+  /** The same money as player-to-player payments (player ids), for the ledger and the UI. */
+  transfers?: Transfer[];
 }
