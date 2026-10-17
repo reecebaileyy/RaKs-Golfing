@@ -66,6 +66,11 @@ model Rate {
   rackRateCents     Int?        // the course's normal price, shown struck through on deals
   isHotDeal         Boolean     @default(false)
   paymentMode       PaymentMode @default(PAY_AT_COURSE)
+  // GolfNow sets golfer limits per rate (its "playerRule"); Hot Deals are often 1-2 only.
+  minPlayers        Int         @default(1)
+  maxPlayers        Int         @default(4)
+  // Overrides the course's booking fee for this rate (GolfNow charged more on Hot Deals).
+  convenienceFeeCents Int?
   holds             Hold[]
   reservations      Reservation[]
 }

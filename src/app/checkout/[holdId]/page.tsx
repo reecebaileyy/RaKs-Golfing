@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { getHold } from "@/lib/booking";
+import { bookingFeeCents, getHold } from "@/lib/booking";
 import { formatTeeDate, formatTeeTime } from "@/lib/time";
 import { CheckoutForm } from "@/components/CheckoutForm";
 
@@ -36,7 +36,7 @@ export default async function CheckoutPage({ params }: { params: Promise<{ holdI
           players={hold.players}
           greenFeeCents={rate.greenFeeCents}
           paymentMode={rate.paymentMode}
-          convenienceFeeCents={course.convenienceFeeCents}
+          convenienceFeeCents={bookingFeeCents(rate, course)}
           taxRateBps={course.taxRateBps}
           taxIncluded={course.taxIncluded}
           cancelWindowHours={course.cancelWindowHours}

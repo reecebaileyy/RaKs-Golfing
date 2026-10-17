@@ -18,6 +18,15 @@ export class BookingError extends Error {
   }
 }
 
+export function playerRange(rate: { minPlayers: number; maxPlayers: number }): string {
+  return rate.minPlayers === rate.maxPlayers ? `${rate.minPlayers}` : `${rate.minPlayers}-${rate.maxPlayers}`;
+}
+
+/** Per-golfer booking fee: the rate's own if it sets one, otherwise the course's. */
+export function bookingFeeCents(rate: { convenienceFeeCents: number | null }, course: { convenienceFeeCents: number }) {
+  return rate.convenienceFeeCents ?? course.convenienceFeeCents;
+}
+
 // ---------- Search ----------
 
 export interface SearchParams {
@@ -60,6 +69,7 @@ export async function searchTeeTimes(params: SearchParams) {
         const rates = t.rates.filter(
           (r) =>
             (!params.holes || r.holes === params.holes) &&
+            (!params.players || (params.players >= r.minPlayers && params.players <= r.maxPlayers)) &&
             (!params.hotDealsOnly || r.isHotDeal) &&
             (!params.maxPriceCents || r.greenFeeCents <= params.maxPriceCents),
         );
@@ -151,6 +161,9 @@ export async function createHold(input: { rateId: string; players: number; now?:
   if (input.players < rate.teeTime.minPlayers) {
     throw new BookingError(`This tee time needs at least ${rate.teeTime.minPlayers} golfers.`, "INVALID");
   }
+  if (input.players < rate.minPlayers || input.players > rate.maxPlayers) {
+    throw new BookingError(`${rate.name} is for ${playerRange(rate)} golfers.`, "INVALID");
+  }
 
   return db.$transaction(async (tx) => {
     await releaseExpiredHolds(tx, rate.teeTimeId, now);
@@ -221,7 +234,7 @@ export async function checkout(input: CheckoutInput) {
     players: hold.players,
     greenFeeCents: rate.greenFeeCents,
     paymentMode: rate.paymentMode,
-    convenienceFeeCents: course.convenienceFeeCents,
+    convenienceFeeCents: bookingFeeCents(rate, course),
     taxRateBps: course.taxRateBps,
     taxIncluded: course.taxIncluded,
     withProtection: input.withProtection && protectionAvailable(rate.paymentMode),

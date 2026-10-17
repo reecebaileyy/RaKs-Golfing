@@ -47,13 +47,14 @@ async function main() {
         const prime = hour >= 7 && hour < 11;
         const rack = Math.round((c.base * (weekend ? 1.25 : 1) * (twilight ? 0.65 : 1)) / 100) * 100;
 
-        const rates: { name: string; holes: number; cartIncluded: boolean; greenFeeCents: number; rackRateCents?: number; isHotDeal: boolean; paymentMode: PaymentMode }[] = [
+        const rates: { name: string; holes: number; cartIncluded: boolean; greenFeeCents: number; rackRateCents?: number; isHotDeal: boolean; paymentMode: PaymentMode; maxPlayers?: number; convenienceFeeCents?: number }[] = [
           { name: twilight ? "Twilight 18 w/ Cart" : "18 Holes w/ Cart", holes: 18, cartIncluded: true, greenFeeCents: rack, isHotDeal: false, paymentMode: "PAY_AT_COURSE" },
         ];
         if (!prime) rates.push({ name: "9 Holes Walking", holes: 9, cartIncluded: false, greenFeeCents: Math.round(rack * 0.45 / 100) * 100, isHotDeal: false, paymentMode: "PAY_AT_COURSE" });
         if (!prime && rand() < 0.4) {
           const off = 0.2 + rand() * 0.25;
-          rates.push({ name: "Hot Deal 18 w/ Cart", holes: 18, cartIncluded: true, greenFeeCents: Math.round(rack * (1 - off) / 100) * 100, rackRateCents: rack, isHotDeal: true, paymentMode: "PREPAID" });
+          // GolfNow's Hot Deals carried a higher booking fee and were often limited to 1-2 golfers.
+          rates.push({ name: "Hot Deal 18 w/ Cart", holes: 18, cartIncluded: true, greenFeeCents: Math.round(rack * (1 - off) / 100) * 100, rackRateCents: rack, isHotDeal: true, paymentMode: "PREPAID", maxPlayers: rand() < 0.5 ? 2 : 4, convenienceFeeCents: 349 });
         }
 
         await db.teeTime.create({

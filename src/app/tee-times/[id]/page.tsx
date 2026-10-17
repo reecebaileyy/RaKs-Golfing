@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getTeeTime } from "@/lib/booking";
+import { bookingFeeCents, getTeeTime } from "@/lib/booking";
 import { MAX_PLAYERS } from "@/lib/pricing";
 import { formatTeeDate, formatTeeTime } from "@/lib/time";
 import { RatePicker } from "@/components/RatePicker";
@@ -39,7 +39,8 @@ export default async function TeeTimePage({
         </div>
       ) : (
         <RatePicker
-          rates={teeTime.rates}
+          rates={teeTime.rates.map((r) => ({ ...r, bookingFeeCents: bookingFeeCents(r, course) }))}
+          tax={{ taxRateBps: course.taxRateBps, taxIncluded: course.taxIncluded }}
           minPlayers={teeTime.minPlayers}
           maxPlayers={Math.min(MAX_PLAYERS, teeTime.spotsLeft)}
           initialPlayers={sp.players ? Number(sp.players) : undefined}
