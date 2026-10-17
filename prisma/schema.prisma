@@ -1,0 +1,135 @@
+// Booking baseline modeled on how GolfNow sells tee times:
+// a course publishes tee times, each tee time is sold through one or more rates,
+// a golfer places a short hold on a rate, then checks out into a reservation.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Course {
+  id                  String    @id @default(cuid())
+  slug                String    @unique
+  name                String
+  city                String
+  state               String
+  address             String
+  latitude            Float
+  longitude           Float
+  timezone            String    @default("America/Los_Angeles")
+  imageUrl            String?
+  // Per-player booking fee charged by the platform (GolfNow "convenience fee").
+  convenienceFeeCents Int       @default(299)
+  taxRateBps          Int       @default(0) // basis points applied to green fees
+  taxIncluded         Boolean   @default(false)
+  // Hours before the tee time a golfer can still cancel for a refund.
+  cancelWindowHours   Int       @default(24)
+  policyNotes         String    @default("")
+  // Which tee sheet holds this course's real availability ("local" = booked directly with us).
+  teeSheet            String    @default("local")
+  externalCourseId    String?
+  teeTimes            TeeTime[]
+}
+
+model TeeTime {
+  id           String        @id @default(cuid())
+  courseId     String
+  course       Course        @relation(fields: [courseId], references: [id])
+  startsAt     DateTime
+  // Spots left in the foursome; holds and reservations draw this down.
+  spotsLeft    Int           @default(4)
+  minPlayers   Int           @default(1)
+  rates        Rate[]
+  holds        Hold[]
+  reservations Reservation[]
+
+  @@index([courseId, startsAt])
+}
+
+enum PaymentMode {
+  PREPAID       // full amount charged online (all Hot Deals)
+  PAY_AT_COURSE // only the convenience fee is charged online
+}
+
+model Rate {
+  id                String      @id @default(cuid())
+  teeTimeId         String
+  teeTime           TeeTime     @relation(fields: [teeTimeId], references: [id], onDelete: Cascade)
+  name              String      // e.g. "18 Holes w/ Cart", "Twilight"
+  holes             Int         // 9 or 18
+  cartIncluded      Boolean     @default(true)
+  greenFeeCents     Int         // per player
+  rackRateCents     Int?        // the course's normal price, shown struck through on deals
+  isHotDeal         Boolean     @default(false)
+  paymentMode       PaymentMode @default(PAY_AT_COURSE)
+  holds             Hold[]
+  reservations      Reservation[]
+}
+
+enum HoldStatus {
+  ACTIVE
+  CONVERTED
+  RELEASED
+}
+
+// GolfNow holds a selected time and player count for 5 minutes while the golfer checks out.
+model Hold {
+  id          String       @id @default(cuid())
+  teeTimeId   String
+  teeTime     TeeTime      @relation(fields: [teeTimeId], references: [id])
+  rateId      String
+  rate        Rate         @relation(fields: [rateId], references: [id])
+  players     Int
+  status      HoldStatus   @default(ACTIVE)
+  expiresAt   DateTime
+  createdAt   DateTime     @default(now())
+  reservation Reservation?
+}
+
+enum ReservationStatus {
+  CONFIRMED
+  CANCELLED
+}
+
+model Golfer {
+  id           String        @id @default(cuid())
+  email        String        @unique
+  name         String
+  phone        String?
+  // Captured now so the competition milestone can rank golfers on handicap and recent rounds.
+  handicap     Float?
+  reservations Reservation[]
+}
+
+model Reservation {
+  id                  String            @id @default(cuid())
+  confirmationCode    String            @unique
+  holdId              String            @unique
+  hold                Hold              @relation(fields: [holdId], references: [id])
+  teeTimeId           String
+  teeTime             TeeTime           @relation(fields: [teeTimeId], references: [id])
+  rateId              String
+  rate                Rate              @relation(fields: [rateId], references: [id])
+  golferId            String
+  golfer              Golfer            @relation(fields: [golferId], references: [id])
+  players             Int
+  status              ReservationStatus @default(CONFIRMED)
+  // Price snapshot at checkout, in cents, so later rate changes never rewrite a receipt.
+  greenFeeTotalCents  Int
+  convenienceFeeCents Int
+  taxCents            Int
+  protectionCents     Int               @default(0)
+  dueOnlineCents      Int
+  dueAtCourseCents    Int
+  totalCents          Int
+  hasProtection       Boolean           @default(false)
+  paymentRef          String?
+  teeSheetRef         String? // the booking's id in the course's own tee sheet, when it has one
+  createdAt           DateTime          @default(now())
+  cancelledAt         DateTime?
+  refundCents         Int?
+}

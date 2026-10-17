@@ -1,36 +1,51 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# RaKs Golfing
 
-## Getting Started
+> A tee time booking platform that lets everyday golfers compete against one another
+> for cash, based on their handicap and three most recent rounds.
 
-First, run the development server:
+This first milestone is the **booking baseline**: find a tee time, hold it, check
+out and manage the reservation, on a phone-sized screen first. How it maps to
+GolfNow's flow is in [docs/booking-flow.md](docs/booking-flow.md).
+
+## Stack
+
+Next.js 15 (App Router) + TypeScript, Tailwind CSS 4, Prisma (SQLite locally),
+Zod, Vitest and Playwright. It's a mobile-first web app. The JSON API under
+`/api` is what a future native app would call too.
+
+## Run it
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+echo 'DATABASE_URL="file:./dev.db"' > .env
+npx prisma db push
+npm run db:seed      # four demo courses, tee times for the next 10 days
+npm run dev          # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open it in your browser's phone emulator, or on your phone over your LAN.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Tests
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm test             # pricing, cancellation and time zone rules
+npm run test:e2e     # builds, then books and cancels on an iPhone 13 viewport
+```
 
-## Learn More
+In a sandbox with a preinstalled Chromium, set `PW_CHROMIUM_PATH` to its path.
 
-To learn more about Next.js, take a look at the following resources:
+## API
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+| Method | Path | What it does |
+| --- | --- | --- |
+| GET | `/api/tee-times?date=YYYY-MM-DD&players&holes&time&hotDeals&maxPrice&q` | Search |
+| POST | `/api/holds` `{ rateId, players }` | Hold spots for 5 minutes (409 with `alternatives` if gone) |
+| DELETE | `/api/holds/:id` | Release a hold |
+| POST | `/api/reservations` `{ holdId, golfer, withProtection, acceptedPolicies }` | Check out |
+| GET | `/api/reservations?email=` | A golfer's reservations |
+| POST | `/api/reservations/:code/cancel` | Cancel, refunding per policy |
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Not in this milestone
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Accounts and sign-in, real payments (Stripe Connect), partner tee sheet
+integrations, and the competition features (handicaps, recent rounds, cash prizes).
