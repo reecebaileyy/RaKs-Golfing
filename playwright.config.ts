@@ -1,6 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const PORT = 3100;
+// PW_PORT lets several checkouts run their e2e suites side by side.
+const PORT = Number(process.env.PW_PORT ?? 3100);
 
 export default defineConfig({
   testDir: "e2e",
