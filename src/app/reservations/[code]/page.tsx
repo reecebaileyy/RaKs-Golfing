@@ -4,6 +4,10 @@ import { cancellationQuote, getReservation } from "@/lib/booking";
 import { formatCents } from "@/lib/money";
 import { formatTeeDate, formatTeeTime } from "@/lib/time";
 import { CancelButton } from "@/components/CancelButton";
+import { STATUS_LABEL, stakeLine } from "@/components/MatchCard";
+import { MatchInviteLink } from "@/components/MatchInviteLink";
+import { FORMAT_LABEL, FORMAT_SIZE } from "@/lib/matchData";
+import { wagerHoldCents } from "@/lib/wagers/matches";
 
 export const dynamic = "force-dynamic";
 
@@ -31,8 +35,13 @@ export default async function ReservationPage({ params }: { params: Promise<{ co
       ? quote.refundCents > 0
         ? `You'll get ${formatCents(quote.refundCents)} back. The booking fee isn't refundable.`
         : "Nothing was prepaid for green fees, so there's nothing to refund. The booking fee isn't refundable."
-      : `It's past the free cancellation cutoff (${formatTeeDate(quote.deadline, tz)} ${formatTeeTime(quote.deadline, tz)}), so nothing will be refunded.`;
+      : `It's past the free cancellation cutoff (${formatTeeDate(quote.deadline, tz)} ${formatTeeTime(quote.deadline, tz)}), so green fees won't be refunded.`;
+    if (r.match && ["OPEN", "READY"].includes(r.match.status)) {
+      cancelSummary += " The match is called off and every player's wager is refunded in full.";
+    }
   }
+  const wagerCents = r.match ? wagerHoldCents(r.match.format, r.match.stakeCents) : 0;
+  const matchStarted = r.match && ["LIVE", "CONFIRMING", "DISPUTED", "SETTLED"].includes(r.match.status);
 
   return (
     <div className="space-y-5">
@@ -46,6 +55,27 @@ export default async function ReservationPage({ params }: { params: Promise<{ co
         <p data-testid="confirmation-code" className="font-mono text-xl tracking-widest">{r.confirmationCode}</p>
       </div>
 
+      {r.match && (
+        <section className="card space-y-3 p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 className="font-semibold">Your match</h2>
+              <p className="text-sm text-muted">{stakeLine(r.match)}</p>
+            </div>
+            <span className="shrink-0 text-sm text-fairway-600">{STATUS_LABEL[r.match.status]}</span>
+          </div>
+          <p className="text-sm">
+            {r.match.players.length} of {FORMAT_SIZE[r.match.format].players} players in.{" "}
+            {r.match.status === "OPEN" &&
+              (r.match.isOpenChallenge
+                ? "It's on the open challenge board, and you can still send the link."
+                : "Send this link to the people you're playing.")}
+          </p>
+          {r.match.status === "OPEN" && <MatchInviteLink code={r.match.code} title={`${FORMAT_LABEL[r.match.format]} at ${course.name}`} />}
+          <Link href={`/matches/${r.match.code}`} className="block text-center font-medium text-fairway-600">Open match lobby</Link>
+        </section>
+      )}
+
       <section className="card p-4 text-sm">
         <Row label="Golfers" value={String(r.players)} />
         <Row label="Rate" value={`${rate.isHotDeal ? "🔥 " : ""}${rate.name}`} />
@@ -57,6 +87,7 @@ export default async function ReservationPage({ params }: { params: Promise<{ co
         {r.hasProtection && <Row label="Tee Time Protection" value={formatCents(r.protectionCents)} />}
         <div className="my-2 border-t border-line" />
         <Row label="Paid online" value={formatCents(r.dueOnlineCents)} strong />
+        {r.match && <Row label="Wager held (separate)" value={formatCents(wagerCents)} />}
         <Row label="Due at course" value={formatCents(r.dueAtCourseCents)} strong />
         {cancelled && r.refundCents !== null && <Row label="Refunded" value={formatCents(r.refundCents)} strong />}
       </section>
@@ -71,7 +102,7 @@ export default async function ReservationPage({ params }: { params: Promise<{ co
         <span className="block text-muted">{course.address}, {course.city}, {course.state}</span>
       </a>
 
-      {!cancelled && quote.allowed && <CancelButton code={r.confirmationCode} summary={cancelSummary} />}
+      {!cancelled && quote.allowed && !matchStarted && <CancelButton code={r.confirmationCode} summary={cancelSummary} />}
 
       <Link href="/" className="block text-center font-medium text-fairway-600">Book another tee time</Link>
     </div>

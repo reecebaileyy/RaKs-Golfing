@@ -11,7 +11,8 @@
     "db:seed": "tsx prisma/seed.ts",
     "test": "vitest run",
     "test:e2e": "next build && playwright test",
-    "postinstall": "prisma generate"
+    "postinstall": "prisma generate",
+    "sweep": "tsx src/lib/wagers/sweep-cli.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",

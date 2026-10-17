@@ -5,6 +5,10 @@ import { quoteCancellation } from "./cancellation";
 import { payments } from "./payments";
 import { teeSheetFor } from "./teesheet";
 import { timeOfDay, zonedDayRange, type TimeOfDay } from "./time";
+import { canPlayMatches } from "./profile";
+import { snapshotForecast } from "./weather";
+import { cancelMatchForReservation, createMatch, validateMatchSetup, wagerHoldCents, type MatchSetup } from "./wagers/matches";
+import { sendRefunds } from "./wagers/ledger";
 
 type Tx = Prisma.TransactionClient;
 
@@ -188,7 +192,11 @@ export async function createHold(input: { rateId: string; players: number; now?:
 export async function getHold(id: string) {
   return db.hold.findUnique({
     where: { id },
-    include: { rate: true, teeTime: { include: { course: true } }, reservation: true },
+    include: {
+      rate: true,
+      teeTime: { include: { course: { include: { teeSets: { orderBy: { name: "asc" } } } } } },
+      reservation: true,
+    },
   });
 }
 
@@ -205,9 +213,13 @@ export async function releaseHold(id: string) {
 
 export interface CheckoutInput {
   holdId: string;
-  golfer: { name: string; email: string; phone?: string };
+  /** The signed-in booker. Every booking is a wagered match, so it needs an account. */
+  userId: string;
+  golfer: { name: string; phone?: string };
   withProtection: boolean;
   acceptedPolicies: boolean;
+  /** The match set up in the checkout's Match step. */
+  match: MatchSetup;
   now?: Date;
 }
 
@@ -217,6 +229,10 @@ function confirmationCode(): string {
   return Array.from(bytes, (b) => alphabet[b % alphabet.length]).join("");
 }
 
+/**
+ * Books the tee time and opens its match in one go. One card charge covers what's due online for the
+ * booking plus the booker's wager hold; if the database write fails afterwards the whole charge is refunded.
+ */
 export async function checkout(input: CheckoutInput) {
   const now = input.now ?? new Date();
   if (!input.acceptedPolicies) throw new BookingError("Please accept the course policies to book.", "INVALID");
@@ -228,8 +244,16 @@ export async function checkout(input: CheckoutInput) {
     throw new BookingError("Your 5 minute hold ran out. Pick the time again to keep going.", "EXPIRED");
   }
 
+  const user = await db.user.findUnique({ where: { id: input.userId } });
+  if (!user) throw new BookingError("Sign in to book.", "INVALID");
+  const eligible = await canPlayMatches(user.id);
+  if (!eligible.ok) throw new BookingError(eligible.reason ?? "Set up your handicap before booking a match.", "INVALID");
+
   const { rate, teeTime } = hold;
   const course = teeTime.course;
+  validateMatchSetup(input.match, { players: hold.players, teeSetIds: course.teeSets.map((t) => t.id) });
+  const wagerCents = wagerHoldCents(input.match.format, input.match.stakeCents);
+
   const price = priceBooking({
     players: hold.players,
     greenFeeCents: rate.greenFeeCents,
@@ -240,54 +264,84 @@ export async function checkout(input: CheckoutInput) {
     withProtection: input.withProtection && protectionAvailable(rate.paymentMode),
   });
 
+  const chargedCents = price.dueOnlineCents + wagerCents;
   const charge = await payments.charge({
-    amountCents: price.dueOnlineCents,
-    description: `${course.name} tee time for ${hold.players}`,
-    customerEmail: input.golfer.email,
+    amountCents: chargedCents,
+    description: `${course.name} tee time for ${hold.players} + wager hold`,
+    customerEmail: user.email,
   });
   if (!charge.ok) throw new BookingError(charge.error, "PAYMENT_FAILED");
 
-  return db.$transaction(async (tx) => {
-    const { count } = await tx.hold.updateMany({
-      where: { id: hold.id, status: "ACTIVE" },
-      data: { status: "CONVERTED" },
-    });
-    if (count === 0) throw new BookingError("Your hold ran out before payment finished.", "EXPIRED");
+  let reservation;
+  try {
+    reservation = await db.$transaction(async (tx) => {
+      const { count } = await tx.hold.updateMany({
+        where: { id: hold.id, status: "ACTIVE" },
+        data: { status: "CONVERTED" },
+      });
+      if (count === 0) throw new BookingError("Your hold ran out before payment finished.", "EXPIRED");
 
-    const email = input.golfer.email.trim().toLowerCase();
-    const golfer = await tx.golfer.upsert({
-      where: { email },
-      create: { email, name: input.golfer.name.trim(), phone: input.golfer.phone?.trim() || null },
-      update: { name: input.golfer.name.trim(), phone: input.golfer.phone?.trim() || undefined },
-    });
+      // The booking's golfer record is the account's, linked so tee times follow the account.
+      const name = input.golfer.name.trim() || user.name;
+      const golfer = await tx.golfer.upsert({
+        where: { email: user.email },
+        create: { email: user.email, name, phone: input.golfer.phone?.trim() || null, userId: user.id },
+        update: { name, phone: input.golfer.phone?.trim() || undefined, userId: user.id },
+      });
 
-    const teeSheetRef = await teeSheetFor(course).confirmBooking(tx, {
-      teeTimeId: teeTime.id,
-      players: hold.players,
-      golferName: golfer.name,
-    });
-
-    return tx.reservation.create({
-      data: {
-        confirmationCode: confirmationCode(),
-        teeSheetRef,
-        holdId: hold.id,
+      const teeSheetRef = await teeSheetFor(course).confirmBooking(tx, {
         teeTimeId: teeTime.id,
-        rateId: rate.id,
-        golferId: golfer.id,
         players: hold.players,
-        greenFeeTotalCents: price.greenFeeTotalCents,
-        convenienceFeeCents: price.convenienceFeeCents,
-        taxCents: price.taxCents,
-        protectionCents: price.protectionCents,
-        dueOnlineCents: price.dueOnlineCents,
-        dueAtCourseCents: price.dueAtCourseCents,
-        totalCents: price.totalCents,
-        hasProtection: price.protectionCents > 0,
+        golferName: golfer.name,
+      });
+
+      const created = await tx.reservation.create({
+        data: {
+          confirmationCode: confirmationCode(),
+          teeSheetRef,
+          holdId: hold.id,
+          teeTimeId: teeTime.id,
+          rateId: rate.id,
+          golferId: golfer.id,
+          players: hold.players,
+          greenFeeTotalCents: price.greenFeeTotalCents,
+          convenienceFeeCents: price.convenienceFeeCents,
+          taxCents: price.taxCents,
+          protectionCents: price.protectionCents,
+          dueOnlineCents: price.dueOnlineCents,
+          dueAtCourseCents: price.dueAtCourseCents,
+          totalCents: price.totalCents,
+          hasProtection: price.protectionCents > 0,
+          paymentRef: charge.ref,
+        },
+      });
+      const match = await createMatch(tx, {
+        setup: input.match,
+        createdById: user.id,
+        courseId: course.id,
+        teeTimeId: teeTime.id,
+        reservationId: created.id,
+        heldCents: wagerCents,
         paymentRef: charge.ref,
-      },
+        now,
+      });
+      return { ...created, matchId: match.id, matchCode: match.code };
     });
-  });
+  } catch (err) {
+    await sendRefunds([{ ref: charge.ref, amountCents: chargedCents }]);
+    // Two taps at once: the other request won, so hand back its booking.
+    const again = await getHold(hold.id);
+    if (again?.reservation) return again.reservation;
+    throw err;
+  }
+
+  // The forecast is nice to have; a weather outage must never fail a paid booking.
+  try {
+    await snapshotForecast({ reservationId: reservation.id, matchId: reservation.matchId });
+  } catch (err) {
+    console.error("Weather snapshot failed", err);
+  }
+  return reservation;
 }
 
 // ---------- Reservations ----------
@@ -295,7 +349,21 @@ export async function checkout(input: CheckoutInput) {
 export async function getReservation(code: string) {
   return db.reservation.findUnique({
     where: { confirmationCode: code.toUpperCase() },
-    include: { rate: true, golfer: true, teeTime: { include: { course: true } } },
+    include: {
+      rate: true,
+      golfer: true,
+      teeTime: { include: { course: true } },
+      match: { include: { players: true } },
+    },
+  });
+}
+
+/** A signed-in golfer's bookings, through the golfer record linked to their account. */
+export async function listUserReservations(userId: string) {
+  return db.reservation.findMany({
+    where: { golfer: { userId } },
+    include: { rate: true, teeTime: { include: { course: true } }, match: { select: { code: true, status: true } } },
+    orderBy: { teeTime: { startsAt: "asc" } },
   });
 }
 
@@ -326,21 +394,27 @@ export async function cancelReservation(code: string, now = new Date()) {
   if (r.status === "CANCELLED") return r;
   const quote = cancellationQuote(r, now);
   if (!quote.allowed) throw new BookingError(quote.reason, "INVALID");
+  if (r.match && ["LIVE", "CONFIRMING", "DISPUTED"].includes(r.match.status)) {
+    throw new BookingError("Your match has already started, so this booking can't be cancelled.", "INVALID");
+  }
 
-  if (quote.refundCents > 0 && r.paymentRef) await payments.refund(r.paymentRef, quote.refundCents);
-
-  await db.$transaction(async (tx) => {
+  // Database first, then the card refunds, so a retried cancel can never refund twice.
+  const refunds = await db.$transaction(async (tx) => {
     const { count } = await tx.reservation.updateMany({
       where: { id: r.id, status: "CONFIRMED" },
       data: { status: "CANCELLED", cancelledAt: now, refundCents: quote.refundCents },
     });
-    if (count === 1) {
-      await teeSheetFor(r.teeTime.course).cancelBooking(tx, {
-        teeTimeId: r.teeTimeId,
-        players: r.players,
-        teeSheetRef: r.teeSheetRef,
-      });
-    }
+    if (count === 0) return [];
+    await teeSheetFor(r.teeTime.course).cancelBooking(tx, {
+      teeTimeId: r.teeTimeId,
+      players: r.players,
+      teeSheetRef: r.teeSheetRef,
+    });
+    // A match that hasn't started is called off and every player's wager comes back in full.
+    const wagerRefunds = await cancelMatchForReservation(tx, r.id, now);
+    const bookingRefund = quote.refundCents > 0 && r.paymentRef ? [{ ref: r.paymentRef, amountCents: quote.refundCents }] : [];
+    return [...bookingRefund, ...wagerRefunds];
   });
+  await sendRefunds(refunds);
   return getReservation(code);
 }
