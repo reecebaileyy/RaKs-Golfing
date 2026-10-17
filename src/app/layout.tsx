@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import Link from "next/link";
+import { ArrivalBanner } from "@/components/ArrivalBanner";
 import { getCurrentUser } from "@/lib/auth";
 import "./globals.css";
 
@@ -41,7 +42,10 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
               )}
             </div>
           </header>
-          <main className="flex-1 px-4 pb-28 pt-4">{children}</main>
+          <main className="flex-1 px-4 pb-28 pt-4">
+            <ArrivalBanner />
+            {children}
+          </main>
           <nav className="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-card pb-[env(safe-area-inset-bottom)]">
             <div className="mx-auto grid max-w-md grid-cols-5 text-center text-xs font-medium">
               {NAV.map((item) => (
