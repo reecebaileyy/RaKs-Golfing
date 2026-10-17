@@ -19,9 +19,11 @@ own design.
 | Price | Green fees per golfer, a per-golfer **convenience fee** that can differ by rate, sales tax unless "Tax Included". | `src/lib/pricing.ts`. Fee per course, overridable per rate (`Rate.convenienceFeeCents`). |
 | Payment | **Hot Deals are prepaid in full.** Other times are usually pay at course, with only the fee charged online (some courses take partial or full prepayment). | `Rate.paymentMode`: `PREPAID` charges everything online. `PAY_AT_COURSE` charges only our fees online and shows "Due at course". |
 | Protection | Tee Time Protection on prepaid times lets you cancel up to 1 hour before. | Optional add-on at checkout, $3/golfer, prepaid rates only. |
-| Confirm | "Thank you" page with reservation details. | `/reservations/[code]` with an 8-character confirmation code. |
-| Cancel | Refundable 24h+ before (course policy can differ). Convenience fee kept unless the course closes. Inside the window, no refund. | `src/lib/cancellation.ts`. Window per course (`cancelWindowHours`). |
-| Guests | Guest checkout allowed. Rewards only when signed in. | Guest checkout by email. `Golfer` records now carry `handicap` for the competition milestone. |
+| Match | (none: GolfNow doesn't do this) | Checkout has two steps. **Step 1, Match**: format, net or gross, wager (min $20), tees, and "Invite friends" or "Open challenge". Only formats for the number of golfers held can be picked (2: 1v1, 3: nine point and threesomes, 4: best ball). **Step 2, Pay**: golfer details, price with the wager hold, both agreements. See [wagers.md](wagers.md). |
+| Pay | One charge. | One fake charge for what's due online **plus** the booker's wager hold, shown before paying ("Due now: booking fee $5.98 + wager $20.00"). If saving the booking fails afterwards, the whole charge is refunded. |
+| Confirm | "Thank you" page with reservation details. | `/reservations/[code]` with an 8-character confirmation code, the match, and its invite link (copy, or the phone's share sheet). |
+| Cancel | Refundable 24h+ before (course policy can differ). Convenience fee kept unless the course closes. Inside the window, no refund. | `src/lib/cancellation.ts`. Window per course (`cancelWindowHours`). A match that hasn't started is cancelled and every player's wager comes back in full. Once the match is live the booking can't be cancelled. Only the booker (or an admin) can cancel. |
+| Accounts | Guest checkout allowed. Rewards only when signed in. | **Sign-in required**: every booking is a wagered match. Checkout sends signed-out golfers to `/signin?next=/checkout/...` and back; `canPlayMatches` (src/lib/profile.ts) must pass, otherwise checkout links to `/onboarding`. The booking's `Golfer` is linked to the account (`Golfer.userId`). Old guest bookings are still found by email on `/reservations`. |
 
 ## GolfNow's calls, as captured
 
@@ -59,6 +61,8 @@ comes from GolfNow's FAQ.
   provider today: our tables are the tee sheet. A partner tee sheet
   (Lightspeed/Chronogolf, foreUP, Club Prophet, ...) plugs in by setting
   `Course.teeSheet` and registering a provider.
+- **Weather**: after a booking is saved, `snapshotForecast` stores the
+  forecast for the tee time. It never fails a booking.
 - **Payments** (`src/lib/payments.ts`): a fake provider so the flow runs end
   to end. No card data is collected yet. Stripe Connect fits the money flow:
   the golfer pays once, the course's share goes to the course's connected

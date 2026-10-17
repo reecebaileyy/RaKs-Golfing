@@ -1,38 +1,37 @@
 import { expect, test } from "@playwright/test";
+import { bookMatch, holdTomorrow, signIn } from "./match-helpers";
 
-// Walks the whole flow on a phone-sized screen: search, pick a time, hold, check out, cancel.
-test("book and cancel a tee time on mobile", async ({ page }) => {
-  await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Find a tee time" })).toBeVisible();
+// Walks the whole flow on a phone-sized screen: search, hold, sign in, set up the match, pay, cancel.
+test("book a tee time with a match and cancel it", async ({ page }) => {
+  await holdTomorrow(page, 2);
 
-  // Tomorrow, so there are always times left in the day.
-  await page.getByRole("group", { name: "Date" }).getByRole("button").nth(1).click();
-  await page.getByRole("button", { name: "2 golfers" }).click();
-  await expect(page).toHaveURL(/players=2/);
-
-  await page.locator('a[href^="/tee-times/"]').first().click();
-  await expect(page.getByRole("radiogroup", { name: "Rate" })).toBeVisible();
-  await expect(page.getByRole("radio", { name: "2 golfers" })).toHaveAttribute("aria-checked", "true");
-  await page.getByRole("button", { name: /Continue/ }).click();
-
+  // Every booking is a match, so checkout asks you to sign in and brings you back.
+  await expect(page).toHaveURL(/\/signin\?next=%2Fcheckout%2F/);
+  await signIn(page, "jordan@example.com");
   await expect(page).toHaveURL(/\/checkout\//);
   await expect(page.getByRole("timer")).toContainText("holding this time");
-  await page.getByLabel("Full name").fill("Test Golfer");
-  await page.getByLabel("Email").fill("test@example.com");
-  await page.getByRole("checkbox", { name: /agree to the course policies/ }).check();
-  await page.getByRole("button", { name: /Book tee time/ }).click();
 
-  await expect(page.getByText("You're booked")).toBeVisible();
+  // Formats that need a different number of golfers can't be picked.
+  await expect(page.getByRole("radio", { name: "2v2 best ball match play" })).toBeDisabled();
+  await page.getByLabel("Wager").fill("15");
+  await page.getByRole("button", { name: /Next: review and pay/ }).click();
+  await expect(page.getByText("The minimum wager is $20.00.")).toBeVisible();
+
+  await bookMatch(page, { format: "1v1 match play" });
   const code = await page.getByTestId("confirmation-code").textContent();
   expect(code).toMatch(/^[A-Z0-9]{8}$/);
+  await expect(page.getByText("Your match")).toBeVisible();
+  await expect(page.getByTestId("invite-link")).toContainText("/matches/");
 
-  await page.getByRole("link", { name: "My tee times" }).click();
-  await expect(page.getByText(/2 golfers/)).toBeVisible();
+  await page.goto("/reservations");
+  await expect(page.getByText(/2 golfers/).first()).toBeVisible();
 
   await page.goto(`/reservations/${code}`);
   await page.getByRole("button", { name: "Cancel reservation" }).click();
+  await expect(page.getByText(/every player's wager is refunded/)).toBeVisible();
   await page.getByRole("button", { name: "Yes, cancel" }).click();
   await expect(page.getByText("Cancelled", { exact: true })).toBeVisible();
+  await expect(page.getByText("Cancelled: refunded")).toBeVisible();
 });
 
 test("when someone else takes the spots first, offer the closest open times", async ({ browser }) => {
@@ -50,7 +49,7 @@ test("when someone else takes the spots first, offer the closest open times", as
   await golferB.goto(href!);
 
   await golferA.getByRole("button", { name: /Continue/ }).click();
-  await expect(golferA).toHaveURL(/\/checkout\//);
+  await expect(golferA).toHaveURL(/\/(checkout|signin)/);
 
   await golferB.getByRole("button", { name: /Continue/ }).click();
   await expect(golferB.getByText("That tee time just filled up.")).toBeVisible();
