@@ -1,5 +1,8 @@
 // Demo data: four made-up Orange County courses with tee times for the next 10 days.
+import { readdirSync } from "node:fs";
+import { join } from "node:path";
 import { PrismaClient, type PaymentMode } from "@prisma/client";
+import { hashPassword } from "../src/lib/auth";
 import { addDays, todayIn, zonedTime } from "../src/lib/time";
 
 const db = new PrismaClient();
@@ -16,12 +19,67 @@ const courses = [
 let state = 42;
 const rand = () => ((state = (state * 1103515245 + 12345) % 2 ** 31) / 2 ** 31);
 
+// Pars and stroke indexes for a typical par 72, reused by every demo course.
+const PARS = [4, 5, 3, 4, 4, 4, 3, 5, 4, 4, 4, 3, 5, 4, 4, 3, 4, 5];
+const STROKE_INDEX = [7, 3, 15, 1, 11, 9, 17, 5, 13, 8, 2, 16, 4, 12, 6, 18, 10, 14];
+const YARDS = { 3: 165, 4: 390, 5: 530 } as Record<number, number>;
+
+export const DEMO_PASSWORD = "golf1234";
+export const DEMO_USERS = [
+  { email: "reece@example.com", name: "Reece Bailey", ghin: "1234567", ghinIndex: 8.4, verified: true, admin: true, skill: 9 },
+  { email: "maya@example.com", name: "Maya Torres", ghin: "2345678", ghinIndex: 12.1, verified: true, admin: false, skill: 12 },
+  { email: "jordan@example.com", name: "Jordan Lee", ghin: null, ghinIndex: null, verified: false, admin: false, skill: 16 },
+  { email: "sam@example.com", name: "Sam Patel", ghin: "3456789", ghinIndex: 4.2, verified: false, admin: false, skill: 4 },
+  { email: "alex@example.com", name: "Alex Kim", ghin: null, ghinIndex: null, verified: false, admin: false, skill: 20 },
+];
+
+/** Lays 18 holes out in a loop around the clubhouse so location tracking has real coordinates to match. */
+function holeLayout(lat: number, lng: number) {
+  const mPerDegLat = 111_320;
+  const mPerDegLng = 111_320 * Math.cos((lat * Math.PI) / 180);
+  let x = 0;
+  let y = 0;
+  return PARS.map((par, i) => {
+    const heading = (i / 18) * 2 * Math.PI;
+    const length = YARDS[par] * 0.9144;
+    const tee = { x, y };
+    x += Math.cos(heading) * length;
+    y += Math.sin(heading) * length;
+    const green = { x, y };
+    // Step to the next tee.
+    x += Math.cos(heading + Math.PI / 2) * 40;
+    y += Math.sin(heading + Math.PI / 2) * 40;
+    return {
+      number: i + 1,
+      par,
+      strokeIndex: STROKE_INDEX[i],
+      yards: YARDS[par],
+      teeLat: lat + tee.y / mPerDegLat,
+      teeLng: lng + tee.x / mPerDegLng,
+      greenLat: lat + green.y / mPerDegLat,
+      greenLng: lng + green.x / mPerDegLng,
+    };
+  });
+}
+
 async function main() {
+  // Feature data first (it points at bookings and users), then the booking baseline.
+  await db.weatherSnapshot.deleteMany();
+  await db.ledgerEntry.deleteMany();
+  await db.press.deleteMany();
+  await db.holeScore.deleteMany();
+  await db.matchPlayer.deleteMany();
+  await db.match.deleteMany();
+  await db.scoreCard.deleteMany();
+  await db.session.deleteMany();
   await db.reservation.deleteMany();
   await db.hold.deleteMany();
   await db.rate.deleteMany();
   await db.teeTime.deleteMany();
   await db.golfer.deleteMany();
+  await db.user.deleteMany();
+  await db.hole.deleteMany();
+  await db.teeSet.deleteMany();
   await db.course.deleteMany();
 
   const today = todayIn(TZ);
@@ -33,6 +91,13 @@ async function main() {
         convenienceFeeCents: 299, taxRateBps: c.taxRateBps, taxIncluded: c.taxIncluded,
         cancelWindowHours: c.cancelWindowHours,
         policyNotes: `Cancel at least ${c.cancelWindowHours} hours before your tee time for a refund. Proper golf attire required. Rain checks are issued by the pro shop.`,
+        holes: { create: holeLayout(c.latitude, c.longitude) },
+        teeSets: {
+          create: [
+            { name: "Blue", courseRating: 72.1 + (c.base > 10000 ? 1.5 : 0), slope: 128 + (c.base > 10000 ? 8 : 0), par: 72, yards: 6600 },
+            { name: "White", courseRating: 69.8, slope: 121, par: 72, yards: 6150 },
+          ],
+        },
       },
     });
 
@@ -69,7 +134,57 @@ async function main() {
       }
     }
   }
+  await seedGolfers(today);
   console.log(`Seeded ${courses.length} courses from ${today}.`);
+
+  // Feature modules (prisma/seed/*.ts) each export `seed(db)`, run in name order.
+  const dir = join(__dirname, "seed");
+  for (const file of readdirSync(dir).filter((f) => f.endsWith(".ts")).sort()) {
+    const mod = await import(join(dir, file));
+    await mod.seed(db);
+    console.log(`Seeded ${file}.`);
+  }
+}
+
+/** Demo golfers with five recent rounds each, so profiles, handicaps and matches work out of the box. */
+async function seedGolfers(today: string) {
+  const allCourses = await db.course.findMany({ include: { teeSets: true, holes: { orderBy: { number: "asc" } } } });
+  const passwordHash = await hashPassword(DEMO_PASSWORD);
+  for (const u of DEMO_USERS) {
+    const user = await db.user.create({
+      data: {
+        email: u.email, name: u.name, passwordHash, isAdmin: u.admin, state: "CA",
+        ghinNumber: u.ghin, ghinIndex: u.ghinIndex, ghinVerifiedAt: u.verified ? new Date() : null,
+      },
+    });
+    const diffs: number[] = [];
+    for (let r = 0; r < 5; r++) {
+      const course = allCourses[(r + u.skill) % allCourses.length];
+      const tee = course.teeSets.find((t) => t.name === "White")!;
+      // Spread strokes over the holes: harder holes (low stroke index) get the extra strokes first.
+      const over = Math.max(0, Math.round(u.skill * (tee.slope / 113) + (rand() - 0.4) * 6));
+      const strokes = course.holes.map((h) => h.par + Math.floor(over / 18) + (h.strokeIndex <= over % 18 ? 1 : 0));
+      const gross = strokes.reduce((a, b) => a + b, 0);
+      const adjusted = course.holes.reduce((sum, h, i) => sum + Math.min(strokes[i], h.par + 5), 0);
+      const differential = Math.round(((113 / tee.slope) * (adjusted - tee.courseRating)) * 10) / 10;
+      diffs.push(differential);
+      await db.scoreCard.create({
+        data: {
+          userId: user.id, courseId: course.id, teeSetId: tee.id,
+          playedAt: zonedTime(addDays(today, -7 * (r + 1)), 9, 0, TZ),
+          holeStrokes: JSON.stringify(strokes), grossScore: gross, adjustedGross: adjusted, differential,
+        },
+      });
+    }
+    // WHS with 5 scores: the lowest differential. Verified GHIN golfers play off their GHIN index.
+    const appIndex = Math.min(...diffs);
+    await db.user.update({
+      where: { id: user.id },
+      data: u.verified
+        ? { handicapIndex: u.ghinIndex, handicapSource: "GHIN", verified: true }
+        : { handicapIndex: appIndex, handicapSource: "APP" },
+    });
+  }
 }
 
 main().finally(() => db.$disconnect());

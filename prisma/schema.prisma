@@ -32,7 +32,13 @@ model Course {
   // Which tee sheet holds this course's real availability ("local" = booked directly with us).
   teeSheet            String    @default("local")
   externalCourseId    String?
+  // Radius around the clubhouse that counts as "arrived" for the game screen.
+  geofenceMeters      Int       @default(800)
   teeTimes            TeeTime[]
+  teeSets             TeeSet[]
+  holes               Hole[]
+  scoreCards          ScoreCard[]
+  matches             Match[]
 }
 
 model TeeTime {
@@ -46,6 +52,7 @@ model TeeTime {
   rates        Rate[]
   holds        Hold[]
   reservations Reservation[]
+  matches      Match[]
 
   @@index([courseId, startsAt])
 }
@@ -107,6 +114,9 @@ model Golfer {
   phone        String?
   // Captured now so the competition milestone can rank golfers on handicap and recent rounds.
   handicap     Float?
+  // Set when the booking was made by a signed-in account.
+  userId       String?       @unique
+  user         User?         @relation(fields: [userId], references: [id])
   reservations Reservation[]
 }
 
@@ -137,4 +147,316 @@ model Reservation {
   createdAt           DateTime          @default(now())
   cancelledAt         DateTime?
   refundCents         Int?
+  match               Match?
+  weather             WeatherSnapshot[]
 }
+
+// =====================================================================
+// Accounts and golfer profiles
+// =====================================================================
+
+enum HandicapSource {
+  NONE // not enough rounds yet and no GHIN
+  APP  // computed by us from score cards (World Handicap System)
+  GHIN // the golfer's GHIN index (verified or self-reported)
+}
+
+model User {
+  id             String         @id @default(cuid())
+  email          String         @unique
+  name           String
+  passwordHash   String
+  createdAt      DateTime       @default(now())
+  isAdmin        Boolean        @default(false)
+  homeCourseId   String?
+  // Two-letter state the golfer plays from; wagering rules depend on it.
+  state          String?
+  ghinNumber     String?
+  // Index the golfer reported from GHIN. Becomes trusted once an admin checks it.
+  ghinIndex      Float?
+  ghinVerifiedAt DateTime?
+  // The index matches are played off (see src/lib/profile.ts for how it's chosen).
+  handicapIndex  Float?
+  handicapSource HandicapSource @default(NONE)
+  // Verified badge: GHIN checked AND rounds entered in the app.
+  verified       Boolean        @default(false)
+  sessions       Session[]
+  golfer         Golfer?
+  scoreCards     ScoreCard[]
+  matchPlayers   MatchPlayer[]
+  ledgerEntries  LedgerEntry[]
+  matchesCreated Match[]        @relation("MatchCreator")
+}
+
+model Session {
+  id        String   @id // sha256 of the cookie token
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
+
+// A set of tees with its USGA Course Rating and Slope Rating.
+model TeeSet {
+  id           String      @id @default(cuid())
+  courseId     String
+  course       Course      @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  name         String      // "Blue", "White"
+  courseRating Float
+  slope        Int
+  par          Int
+  yards        Int?
+  scoreCards   ScoreCard[]
+  matches      Match[]
+}
+
+model Hole {
+  id          String @id @default(cuid())
+  courseId    String
+  course      Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  number      Int    // 1-18
+  par         Int
+  strokeIndex Int    // 1 = hardest, where handicap strokes go first
+  yards       Int?
+  // Middle of the tee box and of the green, for working out which hole a golfer is on.
+  teeLat      Float?
+  teeLng      Float?
+  greenLat    Float?
+  greenLng    Float?
+
+  @@unique([courseId, number])
+}
+
+enum ScoreCardSource {
+  MANUAL // entered by the golfer on their profile
+  MATCH  // created from a finished match
+}
+
+// One 18-hole round.
+model ScoreCard {
+  id                String          @id @default(cuid())
+  userId            String
+  user              User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  courseId          String
+  course            Course          @relation(fields: [courseId], references: [id])
+  teeSetId          String
+  teeSet            TeeSet          @relation(fields: [teeSetId], references: [id])
+  playedAt          DateTime
+  // JSON array of 18 gross stroke counts, hole 1 first.
+  holeStrokes       String
+  grossScore        Int
+  // After the net double bogey cap.
+  adjustedGross     Int
+  pcc               Int             @default(0)
+  differential      Float
+  countsForHandicap Boolean         @default(true)
+  source            ScoreCardSource @default(MANUAL)
+  matchId           String?
+  createdAt         DateTime        @default(now())
+
+  @@index([userId, playedAt])
+}
+
+// =====================================================================
+// Matches, wagers and live scoring
+// =====================================================================
+
+enum MatchFormat {
+  SINGLES_STROKE   // 1v1 stroke play
+  SINGLES_MATCH    // 1v1 match play
+  FOURBALL_STROKE  // 2v2 best ball stroke play
+  FOURBALL_MATCH   // 2v2 best ball match play
+  NINE_POINT       // 3 players, 5-3-1 points per hole
+  THREESOME_STROKE // 3 players, each pair is its own stroke play match
+  THREESOME_MATCH  // 3 players, each pair is its own match play match
+}
+
+enum ScoringBasis {
+  NET
+  GROSS
+}
+
+enum MatchStatus {
+  OPEN       // waiting for players to join and accept
+  READY      // everyone in and paid, strokes frozen
+  LIVE       // first score entered
+  CONFIRMING // all 18 holes in, waiting for every player to confirm
+  SETTLED    // money moved
+  DISPUTED   // someone disputed the card, money stays held
+  VOID       // nobody accepted in time, wagers refunded, tee time kept
+  CANCELLED  // booking cancelled, wagers refunded
+}
+
+model Match {
+  id                  String        @id @default(cuid())
+  // Short public code used in invite links and the public live scorecard.
+  code                String        @unique
+  format              MatchFormat
+  scoring             ScoringBasis
+  // Per player per opponent pairing (NINE_POINT: the loss cap).
+  stakeCents          Int
+  // NINE_POINT only: dollars per point after the group vote (100, 300 or 500).
+  pointValueCents     Int?
+  isOpenChallenge     Boolean       @default(false)
+  status              MatchStatus   @default(OPEN)
+  createdById         String
+  createdBy           User          @relation("MatchCreator", fields: [createdById], references: [id])
+  courseId            String
+  course              Course        @relation(fields: [courseId], references: [id])
+  teeTimeId           String
+  teeTime             TeeTime       @relation(fields: [teeTimeId], references: [id])
+  teeSetId            String
+  teeSet              TeeSet        @relation(fields: [teeSetId], references: [id])
+  reservationId       String?       @unique
+  reservation         Reservation?  @relation(fields: [reservationId], references: [id])
+  createdAt           DateTime      @default(now())
+  readyAt             DateTime?
+  startedAt           DateTime?
+  finishedAt          DateTime?
+  settledAt           DateTime?
+  voidedAt            DateTime?
+  players             MatchPlayer[]
+  scores              HoleScore[]
+  presses             Press[]
+  ledgerEntries       LedgerEntry[]
+  weather             WeatherSnapshot[]
+
+  @@index([status, isOpenChallenge])
+}
+
+model MatchPlayer {
+  id                String    @id @default(cuid())
+  matchId           String
+  match             Match     @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  userId            String
+  user              User      @relation(fields: [userId], references: [id])
+  // 0/1 for singles and fourball teams; 0/1/2 for three-player games.
+  side              Int
+  joinedAt          DateTime  @default(now())
+  acceptedTermsAt   DateTime?
+  // NINE_POINT: this player's vote for the point value (100, 300 or 500).
+  pointVoteCents    Int?
+  // Frozen when the match is READY.
+  handicapIndex     Float?
+  verifiedAtStart   Boolean   @default(false)
+  courseHandicap    Int?
+  playingHandicap   Int?
+  // JSON array of 18 ints: handicap strokes received on each hole.
+  strokesReceived   String?
+  // Money currently held for this player in this match, in cents.
+  heldCents         Int       @default(0)
+  confirmedAt       DateTime?
+  disputedAt        DateTime?
+  disputeReason     String?
+  // Signed result after settlement: + won, - lost.
+  resultCents       Int?
+
+  @@unique([matchId, userId])
+}
+
+// Gross strokes for one player on one hole, entered by anyone in the group.
+model HoleScore {
+  id          String   @id @default(cuid())
+  matchId     String
+  match       Match    @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  userId      String
+  holeNumber  Int
+  strokes     Int
+  enteredById String
+  updatedAt   DateTime @updatedAt
+
+  @@unique([matchId, userId, holeNumber])
+}
+
+enum PressOutcome {
+  WON  // press side won the hole: bets washed
+  TIED // match stands as if no press
+  LOST // press side pays double
+  MOOT // press side ended up winning or tying the match outright
+}
+
+// The ALOHA PRESS: double or nothing on one hole, called by the side that's down.
+model Press {
+  id            String        @id @default(cuid())
+  matchId       String
+  match         Match         @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  side          Int
+  // Three-player games: which opponent the press is against.
+  opponentSide  Int
+  holeNumber    Int
+  calledById    String
+  createdAt     DateTime      @default(now())
+  outcome       PressOutcome?
+
+  @@unique([matchId, side, opponentSide])
+}
+
+// Double-entry ledger. Every movement of money is a set of entries sharing a txId that sum to zero.
+enum LedgerAccount {
+  EXTERNAL // money outside the app: cards charged, payouts sent
+  WALLET   // a user's withdrawable balance
+  HELD     // a user's money held for a match
+  PLATFORM // our revenue
+}
+
+model LedgerEntry {
+  id          String        @id @default(cuid())
+  txId        String
+  kind        String        // e.g. WAGER_HOLD, PRESS_HOLD, SETTLE, REFUND, WITHDRAW
+  account     LedgerAccount
+  userId      String?
+  user        User?         @relation(fields: [userId], references: [id])
+  matchId     String?
+  match       Match?        @relation(fields: [matchId], references: [id])
+  amountCents Int
+  memo        String        @default("")
+  paymentRef  String?
+  createdAt   DateTime      @default(now())
+
+  @@index([userId, account])
+  @@index([txId])
+}
+
+// =====================================================================
+// Weather
+// =====================================================================
+
+enum WeatherKind {
+  FORECAST // saved when the tee time was booked
+  ACTUAL   // observed conditions at the tee time, saved after the round
+}
+
+model WeatherSnapshot {
+  id            String       @id @default(cuid())
+  kind          WeatherKind
+  provider      String       // "google", "open-meteo", "fake"
+  forTime       DateTime     // the tee time these conditions are for
+  reservationId String?
+  reservation   Reservation? @relation(fields: [reservationId], references: [id])
+  matchId       String?
+  match         Match?       @relation(fields: [matchId], references: [id])
+  tempF         Float?
+  feelsLikeF    Float?
+  windMph       Float?
+  windGustMph   Float?
+  windDir       String?      // "NW"
+  precipChance  Int?         // percent
+  precipIn      Float?
+  humidity      Int?
+  conditions    String       // "Partly cloudy"
+  icon          String?      // short code for the UI: sun, cloud, rain, wind, fog, storm, snow
+  createdAt     DateTime     @default(now())
+
+  @@index([reservationId])
+  @@index([matchId])
+}
+
+// ==== wagers additions (append new models below) ====
+
+// ==== profiles additions ====
+
+// ==== live game additions ====
+
+// ==== rankings additions ====
+
+// ==== weather additions ====
