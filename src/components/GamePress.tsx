@@ -52,7 +52,7 @@ export function GamePress({ view, onCall }: { view: PlayView; onCall: (opponentS
           <li>Lose: you pay double ({formatCents(open.loseCents)}).</li>
         </ul>
         <p className="text-sm text-muted">
-          We hold an extra {formatCents(open.holdCentsEach)} now{teammates > 1 ? " from each player on your side" : " from your wallet"}. You get it back unless you lose the hole.
+          We hold an extra {formatCents(open.holdCentsEach)} now{teammates > 1 ? " from each player on your side" : " on your card"}. You get it back unless you lose the hole.
         </p>
         {error && <p role="alert" className="rounded-xl border border-red-300 bg-red-50 p-3 text-sm text-red-800">{error}</p>}
         <div className="grid grid-cols-2 gap-2">
