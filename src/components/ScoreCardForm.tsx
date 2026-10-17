@@ -3,11 +3,10 @@
 import { useRef, useState } from "react";
 import type { CourseOption } from "@/lib/profileData";
 import { holeStrokesError, toPar } from "@/lib/stats";
+import { todayIn } from "@/lib/time";
 
-function localToday() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
+// Today at the course, which is what the server checks the date against.
+const courseToday = (course?: CourseOption) => todayIn(course?.timezone ?? "America/Los_Angeles");
 
 const sum = (xs: (number | null)[]) => xs.reduce<number>((a, b) => a + (b ?? 0), 0);
 
@@ -26,7 +25,7 @@ export function ScoreCardForm({
   const [courseId, setCourseId] = useState(courses.find((c) => c.id === defaultCourseId)?.id ?? courses[0]?.id ?? "");
   const course = courses.find((c) => c.id === courseId);
   const [teeSetId, setTeeSetId] = useState(course?.teeSets[0]?.id ?? "");
-  const [date, setDate] = useState(localToday());
+  const [date, setDate] = useState(() => courseToday(course));
   const [strokes, setStrokes] = useState<(number | null)[]>(Array(18).fill(null));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -126,7 +125,7 @@ export function ScoreCardForm({
         </label>
         <label className="block">
           <span className="mb-1 block text-sm">Date played</span>
-          <input type="date" value={date} max={localToday()} onChange={(e) => setDate(e.target.value)} required className="w-full rounded-xl border border-line bg-card px-4 py-3 text-base" />
+          <input type="date" value={date} max={courseToday(course)} onChange={(e) => setDate(e.target.value)} required className="w-full rounded-xl border border-line bg-card px-4 py-3 text-base" />
         </label>
       </div>
       {nine(0, "Front", front)}
