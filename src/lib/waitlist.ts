@@ -37,21 +37,21 @@ const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const newReferralCode = () => Array.from({ length: 7 }, () => CODE_ALPHABET[randomInt(CODE_ALPHABET.length)]).join("");
 const clip = (s: string | null | undefined, n = 100) => (s ? s.trim().slice(0, n) || null : null);
 
-async function referrerId(code: string | null | undefined): Promise<string | null> {
+/** The entry whose invite link brought this golfer, if the code is real. */
+async function referrer(code: string | null | undefined) {
   if (!code) return null;
-  const entry = await db.waitlistEntry.findUnique({ where: { referralCode: code.trim().toUpperCase() }, select: { userId: true } });
-  return entry?.userId ?? null;
+  return db.waitlistEntry.findUnique({ where: { referralCode: code.trim().toUpperCase() }, select: { id: true, userId: true } });
 }
 
 /** The entry's fields. Referral codes are 7 characters from 32, so a clash is not a practical worry. */
 async function entryData(input: JoinInput, userId?: string) {
-  const referredById = await referrerId(input.referralCode);
+  const ref = await referrer(input.referralCode);
   return {
     method: input.method,
     zip: normalizeZip(input.zip),
     roundsPerMonth: input.roundsPerMonth ?? null,
     referralCode: newReferralCode(),
-    referredById: referredById && referredById !== userId ? referredById : null,
+    referredById: ref && ref.userId !== userId ? ref.id : null,
     utmSource: clip(input.utm?.source),
     utmMedium: clip(input.utm?.medium),
     utmCampaign: clip(input.utm?.campaign),
@@ -233,7 +233,7 @@ export async function waitlistStats(now = new Date(), days = 30): Promise<Waitli
 /** Every sign-up as CSV, oldest first, for a spreadsheet or an email tool. */
 export async function waitlistCsv(): Promise<string> {
   const rows = await entryRows();
-  const codeToName = new Map(rows.map((r) => [r.userId, r.user.name]));
+  const nameOf = new Map(rows.map((r) => [r.id, r.user.name]));
   const lines = [
     csvLine(["joined_at", "name", "email", "phone", "signed_up_with", "social_handles", "zip", "rounds_per_month", "source", "utm_medium", "utm_campaign", "referred_by", "referral_code"]),
     ...rows.map((r) =>
@@ -249,7 +249,7 @@ export async function waitlistCsv(): Promise<string> {
         sourceOf(r),
         r.utmMedium,
         r.utmCampaign,
-        r.referredById ? codeToName.get(r.referredById) ?? "" : "",
+        r.referredById ? nameOf.get(r.referredById) ?? "" : "",
         r.referralCode,
       ]),
     ),

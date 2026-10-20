@@ -37,7 +37,10 @@ export default async function ProfilePage() {
         initial={{ name: user.name, homeCourseId: user.homeCourseId, state: user.state, ghinNumber: user.ghinNumber, ghinIndex: user.ghinIndex }}
       />
       {user.isAdmin && (
-        <Link href="/admin/verify" className="block text-center text-sm font-medium text-fairway-600">GHIN verification queue</Link>
+        <div className="space-y-2">
+          <Link href="/admin/verify" className="block text-center text-sm font-medium text-fairway-600">GHIN verification queue</Link>
+          <Link href="/admin/waitlist" className="block text-center text-sm font-medium text-fairway-600">Waitlist dashboard</Link>
+        </div>
       )}
       <div className="text-center">
         <SignOutButton />

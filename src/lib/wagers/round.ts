@@ -156,6 +156,8 @@ async function settleInTx(tx: Tx, matchId: string, from: MatchStatus[], now: Dat
 export async function confirmCard(input: { matchId: string; userId: string }): Promise<void> {
   const now = new Date();
   const settled = await db.$transaction(async (tx) => {
+    // Lock the match first: two last confirms at once would each count the other as still waiting, and neither would settle.
+    await tx.$queryRaw`SELECT 1 FROM "Match" WHERE "id" = ${input.matchId} FOR UPDATE`;
     const match = await tx.match.findUnique({ where: { id: input.matchId }, include: { players: true } });
     if (!match) throw new AppError("We couldn't find that match.", 404, "NOT_FOUND");
     if (!match.players.some((p) => p.userId === input.userId)) throw new AppError("Only players in this match can confirm.", 403, "FORBIDDEN");
@@ -177,6 +179,8 @@ export async function disputeCard(input: { matchId: string; userId: string; reas
   const reason = input.reason.trim().slice(0, 500);
   if (!reason) throw new AppError("Say what's wrong with the card.");
   await db.$transaction(async (tx) => {
+    // Lock the match first so a second player disputing at the same time sees DISPUTED and is recorded too.
+    await tx.$queryRaw`SELECT 1 FROM "Match" WHERE "id" = ${input.matchId} FOR UPDATE`;
     const match = await tx.match.findUnique({ where: { id: input.matchId }, include: { players: true } });
     if (!match) throw new AppError("We couldn't find that match.", 404, "NOT_FOUND");
     if (!match.players.some((p) => p.userId === input.userId)) throw new AppError("Only players in this match can dispute.", 403, "FORBIDDEN");

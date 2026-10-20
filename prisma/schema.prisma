@@ -6,9 +6,12 @@ generator client {
   provider = "prisma-client-js"
 }
 
+// Postgres everywhere: Neon in production, a local or Docker Postgres for development and tests.
+// DATABASE_URL may go through a connection pooler; migrations use the direct DATABASE_URL_UNPOOLED.
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DATABASE_URL_UNPOOLED")
 }
 
 model Course {

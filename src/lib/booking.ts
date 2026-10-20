@@ -48,7 +48,7 @@ export async function searchTeeTimes(params: SearchParams) {
   const now = params.now ?? new Date();
   const courses = await db.course.findMany({
     where: params.q
-      ? { OR: [{ name: { contains: params.q } }, { city: { contains: params.q } }] }
+      ? { OR: [{ name: { contains: params.q, mode: "insensitive" as const } }, { city: { contains: params.q, mode: "insensitive" as const } }] }
       : undefined,
     orderBy: { name: "asc" },
   });

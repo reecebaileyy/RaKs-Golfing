@@ -226,9 +226,10 @@ export async function withdraw(input: { userId: string; amountCents: number; req
   // A retried request (double tap, flaky network) carries the same requestId and is a no-op.
   const txId = input.requestId ? `wd_${input.userId}_${input.requestId}` : newTxId();
   await db.$transaction(async (tx) => {
+    // Lock the golfer's row first so two withdrawals can't both pass the balance check,
+    // and a retry waiting on the lock sees the first one's entries and stops here.
+    await tx.$queryRaw`SELECT 1 FROM "User" WHERE "id" = ${input.userId} FOR UPDATE`;
     if (await tx.ledgerEntry.findFirst({ where: { txId }, select: { id: true } })) return;
-    // Take the write lock first so two withdrawals can't both pass the balance check.
-    await tx.user.update({ where: { id: input.userId }, data: {} });
     const { walletCents } = await getBalances(input.userId, tx);
     if (input.amountCents > walletCents) throw new AppError("That's more than your wallet balance.", 409, "INSUFFICIENT");
     await postTransaction(tx, {

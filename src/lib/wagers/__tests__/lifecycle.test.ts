@@ -1,16 +1,11 @@
-// Match lifecycle against a real SQLite database, with the golf math mocked so these tests
+// Match lifecycle against a real Postgres database (its own schema, see pgTestDb.ts), with the golf math mocked so these tests
 // only check the money: holds, refunds, settlement and idempotency.
 // The real golf math is covered end to end by e2e/matches.spec.ts and the seed (prisma/seed/20-matches.ts).
-import { rmSync } from "node:fs";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.hoisted(async () => {
-  const { execSync } = await import("node:child_process");
-  const { rmSync } = await import("node:fs");
-  const file = `wagers-test-${process.pid}.db`;
-  rmSync(`prisma/${file}`, { force: true });
-  process.env.DATABASE_URL = `file:./${file}`;
-  execSync("npx prisma db push --skip-generate", { env: process.env, stdio: "ignore" });
+const schema = await vi.hoisted(async () => {
+  const { useTestSchema } = await import("../../__tests__/pgTestDb");
+  return useTestSchema("wagers");
 });
 
 const golf = vi.hoisted(() => ({
@@ -33,6 +28,7 @@ vi.mock("../../profile", () => ({
 import { db } from "../../db";
 import { payments } from "../../payments";
 import { cancelReservation, checkout, createHold } from "../../booking";
+import { recordHoleScores } from "../../live";
 import { getBalances, ledgerTotal, withdraw } from "../ledger";
 import { joinMatch, leaveMatch, sweepMatches, type MatchSetup } from "../matches";
 import { callPress, confirmCard, disputeCard, onScoresChanged, resolveDispute } from "../round";
@@ -58,8 +54,8 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  await db.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
   await db.$disconnect();
-  rmSync(`prisma/wagers-test-${process.pid}.db`, { force: true });
 });
 
 beforeEach(() => {
@@ -301,6 +297,56 @@ describe("the round", () => {
     await expectBooksBalance(match.id);
   });
 
+  async function confirmingMatch() {
+    const match = await readyMatch();
+    golf.computeMatchState.mockReturnValue({ finished: true });
+    await score(match.id, 1);
+    await onScoresChanged(match.id);
+    golf.settleMatch.mockImplementation((input: { players: { id: string; side: number }[] }) => ({
+      payouts: Object.fromEntries(input.players.map((p) => [p.id, p.side === 0 ? 2000 : -2000])),
+      pressOutcomes: [],
+      lines: [],
+    }));
+    return match;
+  }
+
+  it("the last two players confirming at the same moment settle the match once", async () => {
+    const match = await confirmingMatch();
+    const results = await Promise.allSettled([
+      confirmCard({ matchId: match.id, userId: users.reece }),
+      confirmCard({ matchId: match.id, userId: users.maya }),
+    ]);
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(2);
+    expect((await db.match.findUniqueOrThrow({ where: { id: match.id } })).status).toBe("SETTLED");
+    expect(golf.settleMatch).toHaveBeenCalledTimes(1);
+    expect(new Set((await db.ledgerEntry.findMany({ where: { matchId: match.id, kind: "SETTLE" } })).map((e) => e.txId)).size).toBe(1);
+    await expectBooksBalance(match.id);
+  });
+
+  it("a score fixed while the last player confirms either reopens the card or is refused", async () => {
+    const match = await confirmingMatch();
+    await confirmCard({ matchId: match.id, userId: users.reece });
+    const [edit, confirm] = await Promise.allSettled([
+      recordHoleScores({ matchId: match.id, enteredById: users.reece, holeNumber: 1, scores: [{ userId: users.maya, strokes: 5 }] }),
+      confirmCard({ matchId: match.id, userId: users.maya }),
+    ]);
+    expect(confirm.status).toBe("fulfilled");
+    const after = await db.match.findUniqueOrThrow({ where: { id: match.id }, include: { players: true } });
+    const { strokes } = await db.holeScore.findFirstOrThrow({ where: { matchId: match.id, userId: users.maya, holeNumber: 1 } });
+    if (after.status === "SETTLED") {
+      // The confirm got there first: the card it paid out on can't change afterwards (and no deadlock).
+      expect(edit).toMatchObject({ status: "rejected", reason: expect.objectContaining({ code: "CLOSED" }) });
+      expect(strokes).toBe(4);
+    } else {
+      // The fix got there first: Reece has to confirm the new card before anything settles.
+      expect(edit.status).toBe("fulfilled");
+      expect(after.status).toBe("CONFIRMING");
+      expect(strokes).toBe(5);
+      expect(after.players.find((p) => p.userId === users.reece)!.confirmedAt).toBeNull();
+    }
+    await expectBooksBalance(match.id);
+  });
+
   it("confirming is only for a finished card, and a score change resets confirmations", async () => {
     const match = await readyMatch();
     golf.computeMatchState.mockReturnValue({ finished: false });
@@ -333,6 +379,21 @@ describe("the round", () => {
     expect(await heldFor(match.id, users.reece)).toBe(0);
     await expectBooksBalance(match.id);
   });
+
+  it("two players disputing at the same moment are both recorded", async () => {
+    const match = await readyMatch();
+    golf.computeMatchState.mockReturnValue({ finished: false });
+    await score(match.id, 1);
+    await onScoresChanged(match.id);
+    const results = await Promise.allSettled([
+      disputeCard({ matchId: match.id, userId: users.reece, reason: "Hole 1 was a 5" }),
+      disputeCard({ matchId: match.id, userId: users.maya, reason: "Hole 1 was a 3" }),
+    ]);
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(2);
+    expect((await db.match.findUniqueOrThrow({ where: { id: match.id } })).status).toBe("DISPUTED");
+    const players = await db.matchPlayer.findMany({ where: { matchId: match.id } });
+    expect(players.map((p) => p.disputeReason).sort()).toEqual(["Hole 1 was a 3", "Hole 1 was a 5"]);
+  });
 });
 
 describe("wallet", () => {
@@ -351,6 +412,23 @@ describe("wallet", () => {
     const both = await Promise.allSettled([withdraw({ userId, amountCents: 2000 }), withdraw({ userId, amountCents: 2000 })]);
     expect(both.filter((r) => r.status === "fulfilled")).toHaveLength(1);
     expect((await getBalances(userId)).walletCents).toBe(0);
+    await expectBooksBalance();
+  });
+
+  it("a retry racing the first withdrawal is a no-op, not an error", async () => {
+    const userId = (await db.user.create({ data: { email: "w2@example.com", name: "W2", passwordHash: "x" } })).id;
+    await db.ledgerEntry.createMany({
+      data: [
+        { txId: "seed_w2", kind: "SETTLE", account: "EXTERNAL", amountCents: -5000 },
+        { txId: "seed_w2", kind: "SETTLE", account: "WALLET", userId, amountCents: 5000 },
+      ],
+    });
+    const both = await Promise.allSettled([
+      withdraw({ userId, amountCents: 3000, requestId: "req-race-1" }),
+      withdraw({ userId, amountCents: 3000, requestId: "req-race-1" }),
+    ]);
+    expect(both.filter((r) => r.status === "fulfilled")).toHaveLength(2);
+    expect((await getBalances(userId)).walletCents).toBe(2000);
     await expectBooksBalance();
   });
 });
