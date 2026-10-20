@@ -1,7 +1,9 @@
 import type { Metadata, Viewport } from "next";
+import { headers } from "next/headers";
 import Link from "next/link";
 import { ArrivalBanner } from "@/components/ArrivalBanner";
 import { getCurrentUser } from "@/lib/auth";
+import type { Chrome } from "@/lib/siteMode";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -25,7 +27,32 @@ const NAV = [
 ];
 
 export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  const user = await getCurrentUser();
+  // Set by middleware: the landing page draws its own page, and waitlist mode hides the app's tabs.
+  const chrome = ((await headers()).get("x-raks-chrome") ?? "full") as Chrome;
+  if (chrome === "none") {
+    return (
+      <html lang="en">
+        <body className="font-sans antialiased">{children}</body>
+      </html>
+    );
+  }
+  const user = chrome === "full" ? await getCurrentUser() : null;
+  if (chrome === "minimal") {
+    return (
+      <html lang="en">
+        <body className="font-sans antialiased">
+          <div className="mx-auto flex min-h-dvh max-w-md flex-col">
+            <header className="bg-fairway-700 px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] text-white">
+              <Link href="/" className="text-lg font-bold tracking-tight">
+                RaKs Golfing
+              </Link>
+            </header>
+            <main className="flex-1 px-4 pb-12 pt-4">{children}</main>
+          </div>
+        </body>
+      </html>
+    );
+  }
   return (
     <html lang="en">
       <body className="font-sans antialiased">

@@ -64,7 +64,7 @@ function holesUp(a: number[], b: number[]) {
 
 export async function seed(db: PrismaClient) {
   const users = await db.user.findMany({ where: { email: { in: Object.keys(SKILL) } } });
-  const byKey = new Map(users.map((u) => [u.email.split("@")[0], u]));
+  const byKey = new Map(users.map((u) => [u.email!.split("@")[0], u]));
   const courses = await db.course.findMany({ include: { teeSets: true, holes: { orderBy: { number: "asc" } } } });
   if (users.length < 5 || courses.length === 0) return;
   const today = todayIn(TZ);
@@ -80,7 +80,7 @@ export async function seed(db: PrismaClient) {
       const u = byKey.get(key)!;
       const index = u.handicapIndex ?? 18;
       const courseHandicap = Math.round(index * (tee.slope / 113) + (tee.courseRating - tee.par));
-      const skill = SKILL[u.email];
+      const skill = SKILL[u.email!];
       const strokes = course.holes.map((h) => {
         // Harder holes cost more; a bit of luck either way.
         const extra = skill / 18 + (9.5 - h.strokeIndex) / 36 + (rand() - 0.5) * 2.6;

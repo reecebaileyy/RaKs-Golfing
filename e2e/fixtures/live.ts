@@ -50,7 +50,7 @@ export async function createReadyMatch(): Promise<{
     code,
     courseName: course.name,
     firstTee: { lat: hole1.teeLat!, lng: hole1.teeLng! },
-    players: [reece, maya].map((u) => ({ id: u.id, email: u.email, name: u.name })),
+    players: [reece, maya].map((u) => ({ id: u.id, email: u.email!, name: u.name })),
   };
 }
 

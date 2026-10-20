@@ -90,7 +90,7 @@ export async function signUp(input: { name: string; email: string; password: str
 
 export async function signIn(input: { email: string; password: string }) {
   const user = await db.user.findUnique({ where: { email: input.email.trim().toLowerCase() } });
-  if (!user || !(await verifyPassword(input.password, user.passwordHash))) {
+  if (!user?.passwordHash || !(await verifyPassword(input.password, user.passwordHash))) {
     throw new AuthError("That email and password don't match.");
   }
   await startSession(user.id);

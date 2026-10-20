@@ -26,7 +26,7 @@ function orFallback<T>(fn: () => T, fallback: () => T): T {
 const fallbackMaxLoss = (format: MatchFormat, stake: number) => (format.startsWith("THREESOME") ? 2 * stake : stake);
 
 export async function seed(db: PrismaClient) {
-  const users = Object.fromEntries((await db.user.findMany()).map((u) => [u.email.split("@")[0], u]));
+  const users = Object.fromEntries((await db.user.findMany()).map((u) => [u.email!.split("@")[0], u]));
   const courses = await db.course.findMany({ include: { teeSets: true, holes: { orderBy: { number: "asc" } } }, orderBy: { name: "asc" } });
   const now = new Date();
   const today = todayIn(TZ, now);
@@ -59,8 +59,8 @@ export async function seed(db: PrismaClient) {
     });
     const rate = await db.rate.findUniqueOrThrow({ where: { id: teeTime.rateId } });
     const golfer = await db.golfer.upsert({
-      where: { email: user.email },
-      create: { email: user.email, name: user.name, userId: user.id },
+      where: { email: user.email! },
+      create: { email: user.email!, name: user.name, userId: user.id },
       update: { userId: user.id },
     });
     const fee = 299 * players;

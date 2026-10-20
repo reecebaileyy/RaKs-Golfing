@@ -4,7 +4,7 @@
 export interface ChargeRequest {
   amountCents: number;
   description: string;
-  customerEmail: string;
+  customerEmail?: string;
 }
 
 export interface PaymentProvider {

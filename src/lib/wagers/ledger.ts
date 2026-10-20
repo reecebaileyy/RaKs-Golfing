@@ -167,8 +167,8 @@ export async function listHistory(userId: string, take = 50): Promise<HistoryIte
 // ---------- Card charges and refunds (fake provider) ----------
 
 /** Charges a card for money to hold. Throws a 402 the user can read when it fails. */
-export async function chargeCard(input: { amountCents: number; description: string; email: string }): Promise<string> {
-  const charge = await payments.charge({ amountCents: input.amountCents, description: input.description, customerEmail: input.email });
+export async function chargeCard(input: { amountCents: number; description: string; email?: string | null }): Promise<string> {
+  const charge = await payments.charge({ amountCents: input.amountCents, description: input.description, customerEmail: input.email ?? undefined });
   if (!charge.ok) throw new AppError(charge.error, 402, "PAYMENT_FAILED");
   return charge.ref;
 }
