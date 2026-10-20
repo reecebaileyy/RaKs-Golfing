@@ -22,6 +22,8 @@ with live hole-by-hole scoring, and climb a leaderboard. What's in the app:
   profit (15%).
 - **Weather** saved at booking and at the round ([docs/weather.md](docs/weather.md)).
 
+Docs for every part of the app: [docs/README.md](docs/README.md). Release history: [CHANGELOG.md](CHANGELOG.md).
+
 ## Stack
 
 Next.js 15 (App Router) + TypeScript, Tailwind CSS 4, Prisma (SQLite locally),
