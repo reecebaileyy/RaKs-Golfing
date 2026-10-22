@@ -3,6 +3,41 @@
 Every release of RaKs Golfing, newest first. Each version is a git tag and a
 GitHub release. How to cut one: [docs/releasing.md](docs/releasing.md).
 
+## 0.3.0 (unreleased): the waitlist
+
+A landing page with a waitlist to measure demand before launch, ready to host
+on your own domain.
+
+### Added
+- **Waitlist landing page** at `/waitlist`, and at `/` when `SITE_MODE=waitlist`
+  closes the rest of the app. Golfers join with X, TikTok, Instagram, email or
+  phone; an email or phone number is always required. Optional ZIP code and how
+  often they play. Each golfer gets their spot in line and an invite link.
+- **Accounts without passwords**: every sign-up is a real account tied to the
+  login the golfer picked, so it's there on launch day. Sign in with a one-time
+  code by email (Resend) or text (Twilio), or with the same social login.
+  Connect more social logins from the spot card.
+- **Golf talk wall**: signed-up golfers post short golf takes; no links, rate
+  limited, admins can hide posts.
+- **Demand dashboard** at `/admin/waitlist`: totals, a 30 day chart, sign-ups by
+  login, source (UTM tags and invite links), how often they play and ZIP code,
+  comment moderation and a CSV export.
+- **Privacy and terms pages**, needed for the social login app reviews.
+- **Hosting**: Postgres instead of SQLite, a migration, and a Vercel config.
+  Steps in [docs/hosting.md](docs/hosting.md); the waitlist itself is in
+  [docs/waitlist.md](docs/waitlist.md).
+
+### Changed
+- An account's email is now optional when it has a phone number. Booking asks
+  for an email first, since course confirmations and receipts go there.
+- Local development and tests need a Postgres database (see the README).
+
+### Fixed
+- Races that SQLite hid and Postgres would expose: two withdrawals at once
+  could both pass the balance check, the last two players confirming at once
+  left the match unsettled, a score edit could land on a card that was
+  settling, and a second simultaneous dispute was refused. Each has a test.
+
 ## 0.2.0 (2026-10-20): the whole app
 
 Golfers can now sign in, build a profile, book a tee time with a wagered match,

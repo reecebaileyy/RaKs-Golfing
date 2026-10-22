@@ -2,7 +2,8 @@
 // (see prisma/seed.ts); this adds a READY singles match with frozen strokes on top of them.
 import { PrismaClient } from "@prisma/client";
 
-const db = new PrismaClient({ datasources: { db: { url: process.env.E2E_DATABASE_URL ?? "file:./e2e.db" } } });
+// playwright.config.ts sets E2E_DATABASE_URL to this run's schema.
+const db = new PrismaClient({ datasources: { db: { url: process.env.E2E_DATABASE_URL } } });
 
 export const PASSWORD = "golf1234";
 
@@ -50,7 +51,7 @@ export async function createReadyMatch(): Promise<{
     code,
     courseName: course.name,
     firstTee: { lat: hole1.teeLat!, lng: hole1.teeLng! },
-    players: [reece, maya].map((u) => ({ id: u.id, email: u.email, name: u.name })),
+    players: [reece, maya].map((u) => ({ id: u.id, email: u.email!, name: u.name })),
   };
 }
 

@@ -26,21 +26,28 @@ Docs for every part of the app: [docs/README.md](docs/README.md). Release histor
 
 ## Stack
 
-Next.js 15 (App Router) + TypeScript, Tailwind CSS 4, Prisma (SQLite locally),
+Next.js 15 (App Router) + TypeScript, Tailwind CSS 4, Prisma on Postgres,
 Zod, Vitest and Playwright. It's a mobile-first web app. The JSON API under
 `/api` is what a future native app would call too.
 
 ## Run it
 
+You need a Postgres database. Locally that's Postgres 16 installed on your
+machine, Docker (`docker run -d -p 5432:5432 -e POSTGRES_PASSWORD=postgres postgres:16`),
+or a free [Neon](https://neon.tech) branch.
+
 ```bash
 npm install
-echo 'DATABASE_URL="file:./dev.db"' > .env
-npx prisma db push
+cp .env.example .env # then point DATABASE_URL at your database
+npx prisma migrate deploy
 npm run db:seed      # demo courses, tee times, golfers, matches and history
 npm run dev          # http://localhost:3000
 ```
 
 Open it in your browser's phone emulator, or on your phone over your LAN.
+The pre-launch waitlist is at `/waitlist`; set `SITE_MODE=waitlist` to make it
+the home page ([docs/waitlist.md](docs/waitlist.md)). To put it online, see
+[docs/hosting.md](docs/hosting.md).
 Demo golfers all use the password `golf1234`: reece@example.com (admin),
 maya@, jordan@, sam@ and alex@example.com. `npm run sweep` voids matches
 nobody joined in time.
@@ -52,7 +59,10 @@ npm test             # handicaps, scoring, presses, payouts, ledger, rankings, w
 npm run test:e2e     # builds, then plays the app end to end on an iPhone 13 viewport
 ```
 
-In a sandbox with a preinstalled Chromium, set `PW_CHROMIUM_PATH` to its path.
+Tests use the Postgres at `TEST_DATABASE_URL` (default
+`postgresql://postgres:postgres@localhost:5432/raks_test`); each test file and
+the e2e run get their own schema in it. In a sandbox with a preinstalled
+Chromium, set `PW_CHROMIUM_PATH` to its path.
 
 ## API
 
@@ -64,6 +74,10 @@ In a sandbox with a preinstalled Chromium, set `PW_CHROMIUM_PATH` to its path.
 | POST | `/api/reservations` `{ holdId, golfer, withProtection, acceptedPolicies }` | Check out |
 | GET | `/api/reservations?email=` | A golfer's reservations |
 | POST | `/api/reservations/:code/cancel` | Cancel, refunding per policy |
+| POST | `/api/waitlist/join` `{ method, name, email?, phone?, zip?, roundsPerMonth? }` | Join the waitlist (creates the account) |
+| POST | `/api/waitlist/comments` `{ body }` | Post to the golf talk wall |
+| POST | `/api/auth/code/start` `{ contact }`, `/api/auth/code/verify` `{ contact, code }` | One-time code sign-in |
+| GET | `/api/auth/oauth/:provider/start?intent=waitlist\|signin\|link` | Social sign-in (x, tiktok, instagram) |
 
 ## Not built yet
 

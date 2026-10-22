@@ -5,6 +5,8 @@ Start with the [README](../README.md) to run the app. Release history is in
 
 | Doc | What it covers |
 | --- | --- |
+| [hosting.md](hosting.md) | Putting the site online: Vercel, Neon, your domain, email codes |
+| [waitlist.md](waitlist.md) | The pre-launch waitlist, sign-up options, social login setup, the demand dashboard |
 | [game-rules.md](game-rules.md) | Handicaps, strokes, formats, the ALOHA PRESS, settlement and rankings |
 | [wagers.md](wagers.md) | Where a golfer's money is at each step, and the ledger |
 | [booking-flow.md](booking-flow.md) | The tee time booking flow and how it maps to GolfNow |
@@ -13,7 +15,7 @@ Start with the [README](../README.md) to run the app. Release history is in
 
 ## How the code is laid out
 
-A Next.js 15 App Router app in TypeScript with Prisma on SQLite. Pages are
+A Next.js 15 App Router app in TypeScript with Prisma on Postgres. Pages are
 server components that read through `src/lib`; the JSON API under
 `src/app/api` serves the client components and a future native app.
 
@@ -21,7 +23,11 @@ server components that read through `src/lib`; the JSON API under
 | --- | --- |
 | `prisma/schema.prisma` | The whole data model, with comments |
 | `prisma/seed.ts`, `prisma/seed/*.ts` | Demo courses, golfers, matches, history and weather |
-| `src/lib/auth.ts` | Email and password sign-in, database sessions |
+| `src/lib/auth.ts` | Database sessions, email and password sign-in |
+| `src/lib/loginCodes.ts`, `messaging.ts`, `contact.ts` | One-time sign-in codes by email or text, phone and email rules |
+| `src/lib/oauth/` | X, TikTok and Instagram sign-in, and the test-mode stand-in |
+| `src/lib/waitlist.ts`, `waitlistMath.ts` | Joining, spot in line, referrals, the comment wall, dashboard numbers, CSV |
+| `src/lib/siteMode.ts`, `src/middleware.ts` | `SITE_MODE=waitlist` routing, invite and UTM cookies |
 | `src/lib/booking.ts`, `pricing.ts`, `cancellation.ts`, `teesheet.ts` | Tee time search, holds, checkout, cancel |
 | `src/lib/golf/` | Pure golf rules: handicaps, scoring, press, settlement |
 | `src/lib/wagers/` | Matches, ledger, holds, refunds, settlement, wallet |
@@ -36,7 +42,8 @@ server components that read through `src/lib`; the JSON API under
 `/` book · `/matches` and `/matches/[code]` lobby · `/play/[code]` game screen ·
 `/live` and `/live/[code]` public scorecards · `/leaderboard` · `/profile`,
 `/golfers/[id]` · `/onboarding`, `/scorecards/new` · `/wallet` ·
-`/reservations` · `/admin/verify`.
+`/reservations` · `/admin/verify`. Waitlist: `/waitlist`, `/join/finish`,
+`/signin`, `/admin/waitlist`, `/privacy`, `/terms`.
 
 ## Outside services
 
@@ -47,3 +54,6 @@ server components that read through `src/lib`; the JSON API under
 | Weather | Google Weather with `GOOGLE_WEATHER_API_KEY`, else Open-Meteo (free). |
 | Hole maps | Stored per course in the database; import once (script, admin pins or a paid OSM provider), never fetched live. |
 | Tee sheets | Behind `src/lib/teesheet.ts`; only our own sheet so far. |
+| Hosting | Vercel and Neon Postgres ([hosting.md](hosting.md)). |
+| Sign-in codes | Resend for email, Twilio for texts; logged to the server console when unset. |
+| Social logins | X, TikTok, Instagram (professional accounts only); each needs its own app ([waitlist.md](waitlist.md)). |

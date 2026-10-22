@@ -7,6 +7,7 @@ import { recomputeHandicap } from "@/lib/profile";
 
 const Body = z.object({
   name: z.string().trim().min(2, "Enter your name").optional(),
+  email: z.string().trim().toLowerCase().email("Enter a valid email").optional(),
   homeCourseId: z.string().nullable().optional(),
   state: z
     .string()
@@ -29,6 +30,12 @@ export async function PATCH(req: Request) {
     const body = Body.parse(await req.json());
     const data: Record<string, unknown> = {};
     if (body.name !== undefined) data.name = body.name;
+    if (body.email !== undefined && body.email !== user.email) {
+      const taken = await db.user.findUnique({ where: { email: body.email }, select: { id: true } });
+      if (taken) throw new AppError("Another account already uses that email.", 409, "TAKEN");
+      data.email = body.email;
+      data.emailVerifiedAt = null;
+    }
     if (body.state !== undefined) data.state = body.state ? body.state.toUpperCase() : null;
     if (body.homeCourseId !== undefined) {
       if (body.homeCourseId && !(await db.course.findUnique({ where: { id: body.homeCourseId }, select: { id: true } }))) {

@@ -6,9 +6,12 @@ generator client {
   provider = "prisma-client-js"
 }
 
+// Postgres everywhere: Neon in production, a local or Docker Postgres for development and tests.
+// DATABASE_URL may go through a connection pooler; migrations use the direct DATABASE_URL_UNPOOLED.
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DATABASE_URL_UNPOOLED")
 }
 
 model Course {
@@ -162,10 +165,15 @@ enum HandicapSource {
 }
 
 model User {
-  id             String         @id @default(cuid())
-  email          String         @unique
+  id              String         @id @default(cuid())
+  // Every account has an email or a phone number (waitlist sign-ups may have only one).
+  email           String?        @unique
+  phone           String?        @unique // E.164, e.g. +17145550123
+  emailVerifiedAt DateTime?
+  phoneVerifiedAt DateTime?
   name           String
-  passwordHash   String
+  // Null for accounts that sign in with a social login or a one-time code.
+  passwordHash   String?
   createdAt      DateTime       @default(now())
   isAdmin        Boolean        @default(false)
   homeCourseId   String?
@@ -186,6 +194,9 @@ model User {
   matchPlayers   MatchPlayer[]
   ledgerEntries  LedgerEntry[]
   matchesCreated Match[]        @relation("MatchCreator")
+  oauthAccounts  OAuthAccount[]
+  waitlist       WaitlistEntry?
+  golfComments   GolfComment[]
 }
 
 model Session {
@@ -449,6 +460,73 @@ model WeatherSnapshot {
 
   @@index([reservationId])
   @@index([matchId])
+}
+
+// =====================================================================
+// Pre-launch waitlist and sign-in methods
+// =====================================================================
+
+// A social login linked to an account, so the golfer signs in the same way at launch.
+model OAuthAccount {
+  id                String   @id @default(cuid())
+  userId            String
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider          String   // "x", "tiktok", "instagram"
+  providerAccountId String
+  username          String?
+  displayName       String?
+  avatarUrl         String?
+  createdAt         DateTime @default(now())
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+// One-time sign-in code sent by email or text.
+model LoginCode {
+  id         String    @id @default(cuid())
+  // Normalized email or E.164 phone number.
+  target     String
+  codeHash   String
+  expiresAt  DateTime
+  attempts   Int       @default(0)
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([target, createdAt])
+}
+
+model WaitlistEntry {
+  id             String   @id @default(cuid())
+  userId         String   @unique
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // How they signed up: "email", "phone", "x", "tiktok", "instagram".
+  method         String
+  zip            String?
+  roundsPerMonth String?  // "0-1", "2-4", "5+"
+  // Their own share code, and whose code brought them here.
+  referralCode   String   @unique
+  referredById   String?
+  referredBy     WaitlistEntry?  @relation("Referrals", fields: [referredById], references: [id])
+  referrals      WaitlistEntry[] @relation("Referrals")
+  utmSource      String?
+  utmMedium      String?
+  utmCampaign    String?
+  createdAt      DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+// "Say something about golf" on the landing page.
+model GolfComment {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  body      String
+  hidden    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([hidden, createdAt])
 }
 
 // ==== wagers additions (append new models below) ====

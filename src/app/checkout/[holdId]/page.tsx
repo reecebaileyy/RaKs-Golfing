@@ -5,6 +5,7 @@ import { bookingFeeCents, getHold } from "@/lib/booking";
 import { FORMAT_LABEL, FORMAT_SIZE, MIN_STAKE_CENTS } from "@/lib/matchData";
 import { canPlayMatches } from "@/lib/profile";
 import { formatTeeDate, formatTeeTime } from "@/lib/time";
+import { AddEmailForm } from "@/components/AddEmailForm";
 import { CheckoutForm } from "@/components/CheckoutForm";
 
 export const dynamic = "force-dynamic";
@@ -42,6 +43,14 @@ export default async function CheckoutPage({ params }: { params: Promise<{ holdI
           <Link href={`/onboarding?next=${encodeURIComponent(`/checkout/${hold.id}`)}`} className="mt-3 inline-block font-medium text-fairway-600">
             Set up my profile
           </Link>
+        </div>
+      ) : !user.email ? (
+        <div className="card space-y-3 p-6">
+          <div className="text-center">
+            <p className="font-semibold">Add your email to book</p>
+            <p className="mt-1 text-sm text-muted">The course confirmation and your receipt go to it.</p>
+          </div>
+          <AddEmailForm />
         </div>
       ) : (
         <CheckoutForm

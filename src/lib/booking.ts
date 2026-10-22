@@ -48,7 +48,7 @@ export async function searchTeeTimes(params: SearchParams) {
   const now = params.now ?? new Date();
   const courses = await db.course.findMany({
     where: params.q
-      ? { OR: [{ name: { contains: params.q } }, { city: { contains: params.q } }] }
+      ? { OR: [{ name: { contains: params.q, mode: "insensitive" as const } }, { city: { contains: params.q, mode: "insensitive" as const } }] }
       : undefined,
     orderBy: { name: "asc" },
   });
@@ -246,6 +246,9 @@ export async function checkout(input: CheckoutInput) {
 
   const user = await db.user.findUnique({ where: { id: input.userId } });
   if (!user) throw new BookingError("Sign in to book.", "INVALID");
+  // The course confirmation and receipt go to an email, and the booking's golfer record is keyed by it.
+  const email = user.email;
+  if (!email) throw new BookingError("Add an email to your account to book.", "INVALID");
   const eligible = await canPlayMatches(user.id);
   if (!eligible.ok) throw new BookingError(eligible.reason ?? "Set up your handicap before booking a match.", "INVALID");
 
@@ -268,7 +271,7 @@ export async function checkout(input: CheckoutInput) {
   const charge = await payments.charge({
     amountCents: chargedCents,
     description: `${course.name} tee time for ${hold.players} + wager hold`,
-    customerEmail: user.email,
+    customerEmail: email,
   });
   if (!charge.ok) throw new BookingError(charge.error, "PAYMENT_FAILED");
 
@@ -284,8 +287,8 @@ export async function checkout(input: CheckoutInput) {
       // The booking's golfer record is the account's, linked so tee times follow the account.
       const name = input.golfer.name.trim() || user.name;
       const golfer = await tx.golfer.upsert({
-        where: { email: user.email },
-        create: { email: user.email, name, phone: input.golfer.phone?.trim() || null, userId: user.id },
+        where: { email },
+        create: { email, name, phone: input.golfer.phone?.trim() || null, userId: user.id },
         update: { name, phone: input.golfer.phone?.trim() || undefined, userId: user.id },
       });
 

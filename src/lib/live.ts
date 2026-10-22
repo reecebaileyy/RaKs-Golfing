@@ -239,6 +239,9 @@ export const scoresBody = z.object({
     .min(1),
 });
 
+const SCORING_STATUSES: string[] = ["READY", "LIVE", "CONFIRMING"];
+const CARD_CLOSED = "This card is closed. Scores can't change now.";
+
 /** Saves one hole for any of the match's players. Any player in the group may enter anyone's strokes. */
 export async function recordHoleScores(input: {
   matchId: string;
@@ -249,9 +252,9 @@ export async function recordHoleScores(input: {
   const match = await db.match.findUnique({ where: { id: input.matchId }, include: { players: true } });
   if (!match) throw new AppError("Match not found.", 404, "NOT_FOUND");
   if (!match.players.some((p) => p.userId === input.enteredById)) throw new AppError("Only players in this match can enter scores.", 403, "FORBIDDEN");
-  if (!["READY", "LIVE", "CONFIRMING"].includes(match.status)) {
+  if (!SCORING_STATUSES.includes(match.status)) {
     throw new AppError(
-      match.status === "OPEN" ? "The match isn't ready yet." : "This card is closed. Scores can't change now.",
+      match.status === "OPEN" ? "The match isn't ready yet." : CARD_CLOSED,
       409,
       "CLOSED",
     );
@@ -260,6 +263,10 @@ export async function recordHoleScores(input: {
   for (const s of input.scores) if (!playerIds.has(s.userId)) throw new AppError("That golfer isn't in this match.", 400);
 
   await db.$transaction(async (tx) => {
+    // Lock the match and check it again, so a score can't land on a card the last confirm is settling.
+    await tx.$queryRaw`SELECT 1 FROM "Match" WHERE "id" = ${match.id} FOR UPDATE`;
+    const { status } = await tx.match.findUniqueOrThrow({ where: { id: match.id }, select: { status: true } });
+    if (!SCORING_STATUSES.includes(status)) throw new AppError(CARD_CLOSED, 409, "CLOSED");
     for (const s of input.scores) {
       await tx.holeScore.upsert({
         where: { matchId_userId_holeNumber: { matchId: match.id, userId: s.userId, holeNumber: input.holeNumber } },
@@ -268,7 +275,7 @@ export async function recordHoleScores(input: {
       });
     }
     // A typo fixed on a finished card means everyone looks at it again.
-    if (match.status === "CONFIRMING") await tx.matchPlayer.updateMany({ where: { matchId: match.id }, data: { confirmedAt: null } });
+    if (status === "CONFIRMING") await tx.matchPlayer.updateMany({ where: { matchId: match.id }, data: { confirmedAt: null } });
   });
   await onScoresChanged(match.id);
 }
