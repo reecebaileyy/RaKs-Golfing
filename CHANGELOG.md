@@ -25,7 +25,8 @@ on your own domain.
 - **Privacy and terms pages**, needed for the social login app reviews.
 - **Hosting**: Postgres instead of SQLite, a migration, and a Vercel config.
   Steps in [docs/hosting.md](docs/hosting.md); the waitlist itself is in
-  [docs/waitlist.md](docs/waitlist.md).
+  [docs/waitlist.md](docs/waitlist.md). Works with Neon or Prisma Postgres:
+  the build falls back to `DATABASE_URL` when `DATABASE_URL_UNPOOLED` isn't set.
 
 ### Changed
 - An account's email is now optional when it has a phone number. Booking asks
