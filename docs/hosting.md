@@ -33,6 +33,11 @@ else is already in the repo.
    project there and paste its **pooled** connection string into
    `DATABASE_URL` and the **direct** one into `DATABASE_URL_UNPOOLED`.
 
+   **Prisma Postgres** (also in the Storage tab) works too. It only adds
+   `DATABASE_URL`, which is a direct connection, and the build uses it for the
+   migrations when `DATABASE_URL_UNPOOLED` isn't set. Connect one database, not
+   both.
+
 ## 2. Settings (You)
 
 In **Settings → Environment Variables**, add these for **Production**:

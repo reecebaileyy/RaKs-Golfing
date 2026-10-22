@@ -3,7 +3,7 @@
 Every release of RaKs Golfing, newest first. Each version is a git tag and a
 GitHub release. How to cut one: [docs/releasing.md](docs/releasing.md).
 
-## 0.3.0 (unreleased): the waitlist
+## 0.3.0 (2026-10-22): the waitlist
 
 A landing page with a waitlist to measure demand before launch, ready to host
 on your own domain.
@@ -25,7 +25,8 @@ on your own domain.
 - **Privacy and terms pages**, needed for the social login app reviews.
 - **Hosting**: Postgres instead of SQLite, a migration, and a Vercel config.
   Steps in [docs/hosting.md](docs/hosting.md); the waitlist itself is in
-  [docs/waitlist.md](docs/waitlist.md).
+  [docs/waitlist.md](docs/waitlist.md). Works with Neon or Prisma Postgres:
+  the build falls back to `DATABASE_URL` when `DATABASE_URL_UNPOOLED` isn't set.
 
 ### Changed
 - An account's email is now optional when it has a phone number. Booking asks
@@ -37,6 +38,16 @@ on your own domain.
   could both pass the balance check, the last two players confirming at once
   left the match unsettled, a score edit could land on a card that was
   settling, and a second simultaneous dispute was refused. Each has a test.
+
+### Not real yet
+- The site isn't hosted yet; [docs/hosting.md](docs/hosting.md) lists the
+  account and DNS steps.
+- Social logins need their own apps: X charges per sign-in, TikTok must
+  approve the app, and Instagram only signs in business or creator accounts.
+- Texted sign-in codes need Twilio and US carrier registration. Until then,
+  golfers who joined with only a phone number keep their spot but can't sign
+  back in.
+- The privacy and terms pages are plain-language drafts with no legal review.
 
 ## 0.2.0 (2026-10-20): the whole app
 
